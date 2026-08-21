@@ -10,9 +10,9 @@ let LANDMARKS = null;
 let map = null;
 let mapReady = false;
 
-// ---------- 헥스빈 (pointy-top axial, ~350m) ----------
+// ---------- 헥스빈 (pointy-top axial, ~240m) ----------
 const COS0 = Math.cos(40.75 * Math.PI / 180);
-const R_HEX = 0.0032;
+const R_HEX = 0.0022;
 
 function hexKey(lat, lon) {
   const x = lon * COS0 / R_HEX, y = lat / R_HEX;
@@ -57,21 +57,51 @@ function aggregate() {
 }
 
 // ---------- 색상 표현식 ----------
-const FILL_COLOR = {
-  count: ["interpolate", ["linear"], ["get", "n"],
-    1, "#dbe4f0", 20, "#7f9cc9", 80, "#345995", 300, "#16294d"],
-  speed: ["interpolate", ["linear"], ["get", "speed"],
-    5, "#a63232", 12, "#d99a4e", 20, "#7f9cc9", 35, "#2e7d52"],
-};
+// 속력: 도로망 최단경로 거리 기준 값에 맞춘 고정 스톱
+const FILL_SPEED = ["interpolate", ["linear"], ["get", "speed"],
+  7, "#a63232", 15, "#d99a4e", 22, "#7f9cc9", 34, "#2e7d52"];
+
+// 밀도: 고정 스톱이면 희소 선택(특정 요일+시간)에서 최저색으로 뭉개짐 →
+// refresh()마다 셀 n값 분위수(p50/p85/p98)로 스톱을 동적 구성
+const COUNT_PALETTE = ["#dbe4f0", "#7f9cc9", "#345995", "#16294d"];
+let fillCount = ["interpolate", ["linear"], ["get", "n"], 1, COUNT_PALETTE[0], 2, COUNT_PALETTE[3]];
+
+function quantileSorted(sorted, p) {
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+function buildCountColor(fc) {
+  const ns = fc.features.map((f) => f.properties.n).sort((a, b) => a - b);
+  const max = ns.length ? ns[ns.length - 1] : 0;
+  if (max > 1) {
+    const stops = [1, quantileSorted(ns, 0.5), quantileSorted(ns, 0.85), quantileSorted(ns, 0.98)];
+    if (stops.every((s, i) => i === 0 || s > stops[i - 1])) {
+      return ["interpolate", ["linear"], ["get", "n"],
+        stops[0], COUNT_PALETTE[0], stops[1], COUNT_PALETTE[1],
+        stops[2], COUNT_PALETTE[2], stops[3], COUNT_PALETTE[3]];
+    }
+  }
+  // 퇴화 케이스(셀 수 적거나 스톱 겹침): [1, max] 2스톱 폴백으로 최소 대비 보장
+  return ["interpolate", ["linear"], ["get", "n"], 1, COUNT_PALETTE[0], Math.max(max, 2), COUNT_PALETTE[3]];
+}
+
+function currentFillColor() {
+  return state.metric === "speed" ? FILL_SPEED : fillCount;
+}
 
 // ---------- 플로우 레이어 ----------
 const flowCache = {}; // wp+band → GeoJSON (lazy fetch)
 let flowReq = 0;      // 최신 요청만 반영하기 위한 시퀀스
 
+// "두꺼울수록 붉게, 얇을수록 파랗고 흐리게" — 통행량 청→적 발산 색 + 투명도 그라데이션
 const FLOW_LINE_COLOR = ["interpolate", ["linear"], ["get", "n"],
-  3, "#9db4d6", 30, "#345995", 120, "#16294d"];
+  3, "#7fa3d1", 20, "#8a7fb8", 60, "#b0596a", 150, "#c73030"];
 const FLOW_LINE_WIDTH = ["interpolate", ["linear"], ["get", "n"],
   3, 0.5, 20, 1.6, 60, 3, 150, 5];
+const FLOW_LINE_OPACITY = ["interpolate", ["linear"], ["get", "n"],
+  3, 0.45, 30, 0.75, 100, 0.95];
 
 // 플로우 모드에서는 요일·시간·지표 필터가 무의미 → disabled 시각 처리
 function setHexControlsDisabled(disabled) {
@@ -141,6 +171,13 @@ const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
 // 요일×시간 평균 속력 히트맵 — 필터와 무관한 전역 패턴 (1회만 렌더)
 function renderHeatChart() {
   if (!window.Plotly) return;
+
+  // 24열×7행 셀이 정사각형에 가깝도록 컨테이너 높이를 플롯 폭에 맞춰 산정
+  // (좌우 여백 l30+r4 + 컬러바 ~66px ≈ 100, 상하 여백 t8+b26 = 34)
+  const el = document.getElementById("chart-heat");
+  const w = el.clientWidth || 1100;
+  el.style.height = Math.max(200, Math.round((w - 100) * 7 / 24) + 34) + "px";
+
   const { dow, hr, v } = TRIPS;
   const sum = Array.from({ length: 7 }, () => new Array(24).fill(0));
   const cnt = Array.from({ length: 7 }, () => new Array(24).fill(0));
@@ -156,7 +193,7 @@ function renderHeatChart() {
     x: [...Array(24).keys()],
     y: DAY_LABELS,
     customdata: cnt,
-    colorscale: [[0, "#a63232"], [0.35, "#d99a4e"], [0.7, "#7f9cc9"], [1, "#2e7d52"]],
+    colorscale: [[0, "#c73030"], [0.4, "#d99a4e"], [0.75, "#7f9cc9"], [1, "#2e5f95"]],
     colorbar: { title: { text: "km/h", side: "top" }, thickness: 10, outlinewidth: 0, tickfont: { size: 10 } },
     hovertemplate: "%{y}요일 %{x}시 · 평균 %{z} km/h · 표본 %{customdata}건<extra></extra>",
   }], {
@@ -247,13 +284,15 @@ function initMap() {
       }
     } catch (e) { /* 스타일 탐색 실패도 무시하고 진행 */ }
 
-    map.addSource("hex", { type: "geojson", data: aggregate() });
+    const hexFc = aggregate();
+    fillCount = buildCountColor(hexFc);
+    map.addSource("hex", { type: "geojson", data: hexFc });
     map.addLayer({
       id: "hex",
       type: "fill",
       source: "hex",
       paint: {
-        "fill-color": FILL_COLOR[state.metric],
+        "fill-color": currentFillColor(),
         "fill-opacity": ["case", ["==", ["get", "faint"], 1], 0.25, 0.72],
         "fill-outline-color": "#ffffff",
       },
@@ -269,7 +308,7 @@ function initMap() {
       paint: {
         "line-color": FLOW_LINE_COLOR,
         "line-width": FLOW_LINE_WIDTH,
-        "line-opacity": 0.85,
+        "line-opacity": FLOW_LINE_OPACITY,
       },
     });
 
@@ -329,7 +368,14 @@ function initMap() {
 
 // ---------- 갱신 ----------
 function refresh() {
-  if (mapReady && map.getSource("hex")) map.getSource("hex").setData(aggregate());
+  const fc = aggregate();
+  fillCount = buildCountColor(fc); // 밀도 스케일을 현재 선택의 분위수로 재산정
+  if (mapReady && map.getSource("hex")) {
+    map.getSource("hex").setData(fc);
+    if (state.metric === "count" && map.getLayer("hex")) {
+      map.setPaintProperty("hex", "fill-color", fillCount);
+    }
+  }
   if (window.updateCharts) window.updateCharts();
 }
 window.__refresh = refresh;
@@ -392,7 +438,7 @@ function bindControls() {
       if (state.metric === btn.dataset.metric) return;
       state.metric = btn.dataset.metric;
       document.querySelectorAll(".ctl-metric button[data-metric]").forEach((b) => b.classList.toggle("on", b === btn));
-      if (mapReady && map.getLayer("hex")) map.setPaintProperty("hex", "fill-color", FILL_COLOR[state.metric]);
+      if (mapReady && map.getLayer("hex")) map.setPaintProperty("hex", "fill-color", currentFillColor());
     });
   });
 

@@ -15,9 +15,9 @@
   </div>
   <div id="kpis" class="kpis">
     <div class="kpi"><span class="kpi-label">분석 트립</span><span class="kpi-value" id="kpi-total">—</span></div>
-    <div class="kpi"><span class="kpi-label">평균 속력<i>직선거리 기준</i></span><span class="kpi-value" id="kpi-speed">—</span></div>
+    <div class="kpi"><span class="kpi-label">평균 속력<i>도로망 경로 기준</i></span><span class="kpi-value" id="kpi-speed">—</span></div>
     <div class="kpi"><span class="kpi-label">최저속 시간대</span><span class="kpi-value" id="kpi-slowest">—</span></div>
-    <div class="kpi"><span class="kpi-label">평균 이동거리</span><span class="kpi-value" id="kpi-dist">—</span></div>
+    <div class="kpi"><span class="kpi-label">평균 이동거리<i>도로망 경로 기준</i></span><span class="kpi-value" id="kpi-dist">—</span></div>
   </div>
 </header>
 
@@ -68,16 +68,16 @@
 <section class="notes" id="insights">
   <h2>관찰</h2>
   <ul>
-    <li><b>오전 9시가 가장 느리다</b> — 시간대 평균 속력 최저(11.8 km/h). 새벽 5시(24.5 km/h)의 절반에 못 미치는 수준이며, 오후 3시(11.8 km/h)도 사실상 같은 값. 심야(0–5시) 평균 19.2 km/h vs 주간(8–18시) 12.4 km/h.</li>
+    <li><b>오후 3시가 가장 느리다</b> — 시간대 평균 속력 최저(14.4 km/h). 오전 9시(14.5 km/h)와 사실상 동률로, 출근 피크만큼 오후 중반도 막힌다는 뜻. 최고인 새벽 5시(30.0 km/h)의 절반 이하. 심야(0–5시) 평균 23.4 km/h vs 주간(8–18시) 15.2 km/h.</li>
     <li><b>트립은 퇴근길에 몰린다</b> — 18시 912건, 19시 903건으로 피크. 최저는 새벽 5시 150건으로 피크의 약 1/6. 시간대별 트립 수 차트에서 그대로 확인 가능.</li>
-    <li><b>주말이 주중보다 빠르다</b> — 평균 속력 주말 15.5 km/h vs 주중 13.9 km/h. 주말은 심야 0–2시 트립 비중이 14.2%로 주중(5.5%)의 2.6배 — 빠른 심야 트립이 평균을 끌어올린 몫도 있다.</li>
-    <li><b>장거리 트립은 고속도로 효과</b> — 직선거리 상위 10%(7.5 km 이상, 평균 12.9 km) 트립의 평균 속력은 24.7 km/h로 나머지(13.2 km/h)의 약 2배. 이 장거리 트립의 25.0%는 JFK, 32.8%는 라과디아를 오가는 트립 — 도로 플로우 레이어에서 공항 방면 간선이 굵게 잡히는 이유.</li>
+    <li><b>주말이 주중보다 빠르다</b> — 평균 속력 주말 18.9 km/h vs 주중 17.0 km/h. 주말은 심야 0–2시 트립 비중이 14.2%로 주중(5.5%)의 2.6배 — 빠른 심야 트립이 평균을 끌어올린 몫도 있다.</li>
+    <li><b>장거리 트립은 고속도로 효과</b> — 도로망 거리 상위 10%(9.0 km 이상, 평균 15.4 km) 트립의 평균 속력은 29.4 km/h로 나머지(16.2 km/h)의 약 1.8배. 이 장거리 트립의 25.0%는 JFK, 35.5%는 라과디아를 오가는 트립 — 도로 플로우 레이어에서 공항 방면 간선이 굵게 잡히는 이유.</li>
   </ul>
 </section>
 
 <footer class="foot">
-  <p><b>데이터</b> — Kaggle NYC Taxi Trip Duration 데이터의 표본 14,587건(2016-01~2016-06) 중 정제 후 14,446건 사용. 제거 141건: NYC 대역 밖 좌표, 60초 미만, 직선거리 0.05km 이하·60km 초과, 직선거리 기준 속력 120km/h 초과. 원본 CSV는 리포지토리에 동봉.</p>
-  <p><b>한계</b> — 속력은 haversine 직선거리 기준의 하한 추정치. 도로 플로우의 경로는 OSM 도로망 최단경로 추정으로 실주행 경로가 아님. 2016년 표본이므로 현재 교통 상황과 다를 수 있음.</p>
+  <p><b>데이터</b> — Kaggle NYC Taxi Trip Duration 데이터의 표본 14,587건(2016-01~2016-06) 중 정제 후 14,446건 사용. 제거 141건: NYC 대역 밖 좌표, 60초 미만, 직선거리 0.05km 이하·60km 초과, 직선거리 기준 속력 120km/h 초과. 속력·거리는 OSM 도로망 최단경로 길이 기준(14,339건), 미라우팅 107건은 직선거리 기준. 원본 CSV는 리포지토리에 동봉.</p>
+  <p><b>한계</b> — 속력은 도로망 최단경로 길이 기준 — 실주행 경로보다 짧거나 같으므로 여전히 하한 추정치. 도로 플로우의 경로도 최단경로 추정으로 실주행 경로가 아님. 2016년 표본이므로 현재 교통 상황과 다를 수 있음.</p>
   <p><b>제작</b> — Claude Code와의 페어링으로 설계·구현. <a href="https://github.com/HollyRiver/NYCTaxiDash">GitHub</a> · © 2026 Shinsung Kang</p>
 </footer>
 

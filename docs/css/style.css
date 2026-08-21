@@ -324,9 +324,10 @@ body {
   border-radius: 8px;
 }
 
-/* 전체 폭 히트맵: 24×7 셀이 정사각형에 가깝도록 낮고 넓게 */
+/* 전체 폭 히트맵: 24×7 셀이 정사각형에 가깝도록 —
+   정확한 높이는 renderHeatChart()가 플롯 폭 기준으로 재산정 (아래는 no-JS 폴백) */
 #chart-heat {
-  height: 260px;
+  height: 340px;
   background: var(--bg-soft);
   border-radius: 8px;
 }
