@@ -1,8 +1,9 @@
+import json
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 import numpy as np
 import pandas as pd
-from build_data import haversine_km, load_clean
+from build_data import apply_network_speed, haversine_km, load_clean
 
 def test_haversine_known_distance():
     # 타임스퀘어(40.7580,-73.9855) ~ JFK(40.6413,-73.7781) ≈ 21.7km
@@ -30,3 +31,20 @@ def test_load_clean_removes_outliers(tmp_path):
     assert list(df.id) == ["a"]
     assert 25 < df.speed_kmh.iloc[0] < 35
     assert df.dow.iloc[0] == 0 and df.hour.iloc[0] == 8
+
+def test_apply_network_speed_joins_by_id(tmp_path):
+    df = pd.DataFrame(dict(id=["a", "b"], trip_duration=[600, 600],
+                           dist_km=[5.0, 5.0], speed_kmh=[30.0, 30.0]))
+    p = tmp_path / "route_km.json"
+    p.write_text(json.dumps({"index": ["a"], "route_km": [6.0]}))
+    out, n = apply_network_speed(df, str(p))
+    assert n == 1
+    # 라우팅된 트립: 도로망 거리/속력으로 교체 (6km / 600s = 36km/h)
+    assert out.dist_km.iloc[0] == 6.0 and abs(out.speed_kmh.iloc[0] - 36.0) < 1e-9
+    # 미라우팅 트립: haversine 값 유지
+    assert out.dist_km.iloc[1] == 5.0 and out.speed_kmh.iloc[1] == 30.0
+
+def test_apply_network_speed_without_file(tmp_path):
+    df = pd.DataFrame(dict(id=["a"], trip_duration=[600], dist_km=[5.0], speed_kmh=[30.0]))
+    out, n = apply_network_speed(df, str(tmp_path / "missing.json"))
+    assert n == 0 and out.speed_kmh.iloc[0] == 30.0

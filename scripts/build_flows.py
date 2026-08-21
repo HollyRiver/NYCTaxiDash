@@ -20,6 +20,7 @@ BBOX = (-74.05, 40.60, -73.75, 40.88)  # (west, south, east, north) 핵심 운�
 MIN_COUNT = 3          # 이 미만 통행 세그먼트는 출력 제외 (용량·노이즈 컷)
 CACHE_GRAPH = "cache/nyc_drive.graphml"
 CACHE_COUNTS = "cache/segment_counts.pkl"  # 라우팅 결과 캐시 (MIN_COUNT 재조정용)
+CACHE_ROUTE_KM = "cache/route_km.json"     # 트립별 도로망 최단경로 거리 (build_data.py에서 조인)
 
 def get_graph():
     if os.path.exists(CACHE_GRAPH):
@@ -30,7 +31,10 @@ def get_graph():
     return G
 
 def build_counters(G):
-    """트립 라우팅 → 슬라이스별 (u, v) 세그먼트 통행량 Counter."""
+    """트립 라우팅 → (슬라이스별 세그먼트 통행량 Counter, 트립별 경로 거리 dict).
+
+    route_km은 {"index": [트립 id...], "route_km": [km...]} — 라우팅 성공 트립만 포함.
+    """
     df = load_clean()
     m = (df.pickup_longitude.between(BBOX[0], BBOX[2]) & df.pickup_latitude.between(BBOX[1], BBOX[3])
          & df.dropoff_longitude.between(BBOX[0], BBOX[2]) & df.dropoff_latitude.between(BBOX[1], BBOX[3]))
@@ -42,26 +46,36 @@ def build_counters(G):
 
     wp = np.where(df.dow < 5, "wd", "we")
     band = (df.hour // 6).values
+    ids = df.id.tolist()
     counters = {(w, b): Counter() for w in ("wd", "we") for b in range(4)}
+    route_km = {"index": [], "route_km": []}
     for i, r in enumerate(routes):
         if r is None or len(r) < 2:
             continue
         c = counters[(wp[i], band[i])]
+        km = 0.0
         for u, v in zip(r[:-1], r[1:]):
             c[(u, v)] += 1
-    return counters
+            km += min(d["length"] for d in G.get_edge_data(u, v).values())
+        route_km["index"].append(ids[i])
+        route_km["route_km"].append(round(km / 1000.0, 4))
+    print(f"routed {len(route_km['index'])}/{len(df)} trips")
+    return counters, route_km
 
 def main(min_count=MIN_COUNT):
     G = get_graph()
-    if os.path.exists(CACHE_COUNTS):
+    if os.path.exists(CACHE_COUNTS) and os.path.exists(CACHE_ROUTE_KM):
         with open(CACHE_COUNTS, "rb") as f:
             counters = pickle.load(f)
         print("loaded segment counts from cache")
     else:
-        counters = build_counters(G)
+        counters, route_km = build_counters(G)
         os.makedirs("cache", exist_ok=True)
         with open(CACHE_COUNTS, "wb") as f:
             pickle.dump(counters, f)
+        with open(CACHE_ROUTE_KM, "w") as f:
+            json.dump(route_km, f, separators=(",", ":"))
+        print(CACHE_ROUTE_KM, "written,", len(route_km["index"]), "trips")
 
     n_max = max((max(c.values()) for c in counters.values() if c), default=0)
     for (w, b), counter in counters.items():

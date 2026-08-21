@@ -1,1 +1,1 @@
-{"n": 14446, "n_raw": 14587, "n_dropped": 141, "period": ["2016-01-01", "2016-06-30"], "avg_speed": 14.4, "avg_dist": 3.45, "slowest_hour": 9}
+{"n": 14446, "n_raw": 14587, "n_dropped": 141, "period": ["2016-01-01", "2016-06-30"], "avg_speed": 17.5, "avg_dist": 4.18, "slowest_hour": 15, "speed_basis": "network", "n_network": 14339}
