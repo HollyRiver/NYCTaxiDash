@@ -74,6 +74,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  flex-shrink: 0; /* 지도(flex:1)가 세로를 채워도 KPI 스트립은 압축되지 않게 */
 }
 
 .kpi {
@@ -118,7 +119,8 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 62fr) minmax(0, 38fr);
   gap: 16px;
-  align-items: start;
+  /* align-items 기본(stretch): 좌측 컬럼이 우측 패널 높이만큼 늘어나고,
+     그 잔여 세로를 #map(flex:1)이 채워 좌우 하단이 맞음 */
   margin-top: 12px;
 }
 
@@ -132,10 +134,9 @@ body {
 
 #map {
   width: 100%;
-  aspect-ratio: 1 / 1;
-  /* 낮은 화면(1366×768 등)에서는 정사각형 대신 화면에 맞게 클램프
-     (250px: 지도 위 헤더+스위치 + 아래 KPI 스트립 몫) */
-  max-height: calc(100vh - 250px);
+  /* 정방형 고정 대신 좌측 컬럼의 잔여 세로(제목/스위치/KPI 제외)를 채움
+     — 우측 패널과 하단 정렬. 세로가 가로보다 길어져도 허용 */
+  flex: 1 1 auto;
   min-height: 420px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -215,9 +216,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* 플로우(요일 범위+시간대 2줄)/헥스(요일+시간+지표 3줄) 중 큰 쪽으로 고정 —
-     모드 전환 시 아래 차트들이 밀리지 않게 (ref/verify4.mjs로 실측) */
-  min-height: 166px;
+}
+
+/* 플로우 모드(2줄)는 헥스 모드(3줄)보다 내용이 적으므로 패딩·gap을 키워
+   두 모드의 카드 높이를 몇 px 이내로 근접 — 모드 전환 시 차트가 튀지 않게
+   (고정 min-height 대신 내용 맞춤, ref/verify6.mjs로 실측) */
+.controls.mode-flow {
+  padding: 22px 16px;
+  gap: 20px;
 }
 
 .ctl-group {
@@ -246,6 +252,7 @@ body {
   margin: 0 6px;
 }
 
+/* 플로우 로딩/실패 상태 표시 전용 (기본은 빈 텍스트 — main.js가 채움) */
 .ctl-note {
   font-size: 0.73rem;
   color: var(--muted);
@@ -285,6 +292,28 @@ body {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* 시간대 줄: 버튼 내부 [라벨/시간범위] 2단 — 5버튼이 한 줄에 수납 */
+.ctl-band button[data-band] {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 40px;
+  padding: 5px 11px;
+}
+
+.ctl-band button[data-band] small {
+  font-size: 0.64rem;
+  font-weight: 400;
+  line-height: 1;
+  color: #9aa1ab;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctl-band button[data-band].on small { color: rgba(255, 255, 255, 0.82); }
 
 /* 요일 줄: 7버튼 + "전체 요일" 토글을 반드시 한 줄에 수납 (소형 정폭 버튼) */
 .ctl-days { flex-wrap: nowrap; gap: 4px; }
@@ -422,8 +451,10 @@ body {
   /* 세로 스택: 지도 → 컨트롤 → 차트들 */
   .dash { grid-template-columns: 1fr; }
 
+  /* 세로 스택에서는 잔여 세로 개념이 없으므로 고정 높이 폴백 */
   #map {
-    max-height: none;
+    flex: 0 0 auto;
+    height: min(100vw, 480px);
     min-height: 360px;
   }
 
@@ -438,7 +469,7 @@ body {
 
   .kpi { padding: 4px 10px; gap: 6px; }
 
-  .controls { padding: 12px 14px; }
+  .controls, .controls.mode-flow { padding: 12px 14px; gap: 10px; }
   .ctl-group {
     flex-direction: column;
     align-items: flex-start;

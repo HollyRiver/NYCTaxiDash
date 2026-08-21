@@ -95,10 +95,10 @@ function currentFillColor() {
 const flowCache = {}; // wp+band → GeoJSON (lazy fetch)
 let flowReq = 0;      // 최신 요청만 반영하기 위한 시퀀스
 
-// "두꺼울수록 붉게, 얇을수록 파랗고 흐리게" — 통행량 청→적 발산 색 + 투명도 그라데이션.
+// 신호등 스케일: 원활(저통행)=초록 → 중간=노랑 → 정체(고통행)=주황→빨강 + 굵기·투명도 그라데이션.
 // 고정 스톱이면 "전체×전체"(n 수백)에서 화면이 포화 → 슬라이스별 n 분위수(p50/p85/p99)로
 // 스톱을 동적 구성 (헥스빈 buildCountColor와 같은 패턴). 아래 상수는 초기(빈 데이터) 기본값.
-const FLOW_PALETTE = ["#7fa3d1", "#8a7fb8", "#b0596a", "#c73030"];
+const FLOW_PALETTE = ["#3f9e63", "#c9c94a", "#e08c3a", "#c73030"];
 const FLOW_WIDTHS = [0.5, 1.6, 3, 5];
 const FLOW_LINE_COLOR = ["interpolate", ["linear"], ["get", "n"],
   3, FLOW_PALETTE[0], 20, FLOW_PALETTE[1], 60, FLOW_PALETTE[2], 150, FLOW_PALETTE[3]];
@@ -144,6 +144,9 @@ function syncModeControls() {
     const grp = document.querySelector(sel);
     if (grp) grp.hidden = flowMode;
   }
+  // 플로우(2줄)는 패딩·gap을 키워 헥스(3줄)와 카드 높이를 근접 (style.css .mode-flow)
+  const card = document.querySelector(".controls");
+  if (card) card.classList.toggle("mode-flow", flowMode);
 }
 
 window.updateFlowLayer = async function () {
@@ -163,15 +166,15 @@ window.updateFlowLayer = async function () {
   const key = state.flowWp + state.flowBand;
   const seq = ++flowReq;
   if (!flowCache[key]) {
+    // .ctl-note는 플로우 로딩/실패 상태 표시 전용 (기본은 빈 텍스트)
     const note = document.querySelector(".ctl-note");
-    if (note && !note.dataset.orig) note.dataset.orig = note.textContent;
     if (note) note.textContent = "로드 중…";
     try {
       flowCache[key] = await fetch(`data/flow_${state.flowWp}_${state.flowBand}.geojson`).then((r) => {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       });
-      if (note) note.textContent = note.dataset.orig;
+      if (note) note.textContent = "";
     } catch (e) {
       console.error("플로우 로드 실패:", e);
       if (note) note.textContent = "플로우 데이터 로드 실패";
@@ -228,7 +231,8 @@ function renderHeatChart() {
     customdata: cnt,
     colorscale: [[0, "#c73030"], [0.4, "#d99a4e"], [0.75, "#7f9cc9"], [1, "#2e5f95"]],
     colorbar: { title: { text: "km/h", side: "top", font: { size: 9 } }, thickness: 8, outlinewidth: 0, tickfont: { size: 9 } },
-    hovertemplate: "%{y}요일 %{x}시 · 평균 %{z} km/h · 표본 %{customdata}건<extra></extra>",
+    // x축 ticksuffix "시"가 hover의 %{x} 포맷에도 적용됨 — "시"를 덧붙이면 "18시시"로 중복
+    hovertemplate: "%{y}요일 %{x} · 평균 %{z} km/h · 표본 %{customdata}건<extra></extra>",
   }], {
     margin: { l: 26, r: 4, t: 8, b: 24 },
     font: { family: CHART_FONT, size: 10, color: "#1c1c1e" },
@@ -254,7 +258,8 @@ window.updateCharts = function () {
     x: [...Array(24).keys()],
     y: counts,
     marker: { color: colors },
-    hovertemplate: "%{x}시 · %{y:,}건<extra></extra>",
+    // ticksuffix "시"가 hover의 %{x}에도 적용되므로 "시"를 덧붙이지 않음 ("18시시" 방지)
+    hovertemplate: "%{x} · %{y:,}건<extra></extra>",
   }], {
     margin: { l: 40, r: 4, t: 8, b: 26 },
     font: { family: CHART_FONT, size: 11, color: "#1c1c1e" },
