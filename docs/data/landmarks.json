@@ -1,0 +1,10 @@
+{"type":"FeatureCollection","features":[
+{"type":"Feature","properties":{"name":"Manhattan"},"geometry":{"type":"Point","coordinates":[-73.9712,40.7831]}},
+{"type":"Feature","properties":{"name":"Central Park"},"geometry":{"type":"Point","coordinates":[-73.9665,40.7812]}},
+{"type":"Feature","properties":{"name":"Times Square"},"geometry":{"type":"Point","coordinates":[-73.9855,40.7580]}},
+{"type":"Feature","properties":{"name":"Wall St"},"geometry":{"type":"Point","coordinates":[-74.0088,40.7061]}},
+{"type":"Feature","properties":{"name":"Brooklyn"},"geometry":{"type":"Point","coordinates":[-73.9442,40.6782]}},
+{"type":"Feature","properties":{"name":"Queens"},"geometry":{"type":"Point","coordinates":[-73.7949,40.7282]}},
+{"type":"Feature","properties":{"name":"JFK"},"geometry":{"type":"Point","coordinates":[-73.7781,40.6413]}},
+{"type":"Feature","properties":{"name":"LaGuardia"},"geometry":{"type":"Point","coordinates":[-73.8740,40.7769]}}
+]}
