@@ -343,3 +343,6 @@ main { margin-top: 16px; }
   .ctl-label { flex-basis: 100%; }
   .ctl-hour input[type="range"] { flex: 1 1 160px; }
 }
+
+/* 초기 데이터 로드 실패 안내 */
+.load-error { color: #a63232; font-size: 14px; margin-top: 10px; }

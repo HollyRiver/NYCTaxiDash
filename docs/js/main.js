@@ -408,4 +408,13 @@ async function init() {
   }
 }
 
-init().catch((e) => console.error("초기화 실패:", e));
+init().catch((e) => {
+  console.error("초기화 실패:", e);
+  const hero = document.querySelector(".hero");
+  if (hero) {
+    const msg = document.createElement("p");
+    msg.className = "load-error";
+    msg.textContent = "데이터 로드 실패 — 새로고침 필요. 문제가 계속되면 GitHub 저장소 이슈로 제보.";
+    hero.appendChild(msg);
+  }
+});
