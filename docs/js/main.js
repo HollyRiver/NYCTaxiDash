@@ -129,6 +129,69 @@ function fillKpis() {
   document.getElementById("kpi-dist").textContent = META.avg_dist + " km";
 }
 
+// ---------- 보조 차트 (Plotly) ----------
+const CHART_FONT = '"Pretendard", -apple-system, "Segoe UI", "Noto Sans KR", "Malgun Gothic", sans-serif';
+const CHART_CONFIG = { displayModeBar: false, responsive: true };
+const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
+
+// 요일×시간 평균 속력 히트맵 — 필터와 무관한 전역 패턴 (1회만 렌더)
+function renderHeatChart() {
+  if (!window.Plotly) return;
+  const { dow, hr, v } = TRIPS;
+  const sum = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  const cnt = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  for (let i = 0; i < dow.length; i++) {
+    sum[dow[i]][hr[i]] += v[i];
+    cnt[dow[i]][hr[i]]++;
+  }
+  const z = sum.map((row, d) => row.map((s, h) => cnt[d][h] ? +(s / cnt[d][h]).toFixed(1) : null));
+
+  Plotly.newPlot("chart-heat", [{
+    type: "heatmap",
+    z,
+    x: [...Array(24).keys()],
+    y: DAY_LABELS,
+    customdata: cnt,
+    colorscale: [[0, "#a63232"], [0.35, "#d99a4e"], [0.7, "#7f9cc9"], [1, "#2e7d52"]],
+    colorbar: { title: { text: "km/h", side: "top" }, thickness: 10, outlinewidth: 0, tickfont: { size: 10 } },
+    hovertemplate: "%{y}요일 %{x}시 · 평균 %{z} km/h · 표본 %{customdata}건<extra></extra>",
+  }], {
+    margin: { l: 30, r: 4, t: 8, b: 26 },
+    font: { family: CHART_FONT, size: 11, color: "#1c1c1e" },
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    xaxis: { dtick: 2, ticksuffix: "시" },
+    yaxis: { autorange: "reversed" }, // 월이 위
+  }, CHART_CONFIG);
+}
+
+// 시간대별 트립 수 막대 — state.days 반영, state.hour 막대만 강조 (refresh 훅에서 갱신)
+window.updateCharts = function () {
+  if (!window.Plotly || !TRIPS) return;
+  const { dow, hr } = TRIPS;
+  const counts = new Array(24).fill(0);
+  for (let i = 0; i < dow.length; i++) {
+    if (state.days.has(dow[i])) counts[hr[i]]++;
+  }
+  const colors = counts.map((_, h) => (state.hour === h ? "#345995" : "#7f9cc9"));
+
+  Plotly.react("chart-hour", [{
+    type: "bar",
+    x: [...Array(24).keys()],
+    y: counts,
+    marker: { color: colors },
+    hovertemplate: "%{x}시 · %{y:,}건<extra></extra>",
+  }], {
+    margin: { l: 40, r: 4, t: 8, b: 26 },
+    font: { family: CHART_FONT, size: 11, color: "#1c1c1e" },
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    xaxis: { dtick: 2, ticksuffix: "시" },
+    yaxis: { gridcolor: "#e4e2dc", zerolinecolor: "#e4e2dc" },
+    bargap: 0.25,
+  }, CHART_CONFIG);
+};
+
 // ---------- 지도 ----------
 function initMap() {
   map = new maplibregl.Map({
@@ -327,6 +390,9 @@ async function init() {
     document.title = `SELFTEST cells=${fc.features.length} trips=${total} n=${META.n}`;
     return; // 셀프테스트에서는 지도 초기화 생략 (WebGL 불필요)
   }
+
+  renderHeatChart();      // 전역 패턴 히트맵 — 필터와 무관, 1회만
+  window.updateCharts();  // 현재 선택 반영 막대 — 이후 refresh()가 갱신
 
   initMap();
 
