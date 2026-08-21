@@ -1,8 +1,8 @@
 /* ==========================================================================
    NYC Taxi Traffic — dashboard layout
    톤: 포트폴리오(hollyriver.github.io)와 통일된 잉크+스틸블루 미니멀
-   구조: 슬림 헤더(제목+부제 한 줄)
-         → [좌: 캡슐 스위치+정방형 지도+KPI 칩 스트립 | 우: 컨트롤+시간대 차트+히트맵]
+   구조: [좌: 헤더(제목+부제)+캡슐 스위치+정방형 지도+KPI 칩 스트립
+          | 우: 컨트롤+시간대 차트+히트맵(페이지 최상단부터)]
          → 관찰/푸터
    ========================================================================== */
 
@@ -33,31 +33,28 @@ body {
 }
 
 /* 본문 블록 공통: 중앙 정렬 컬럼 */
-.hero, .dash, .notes, .foot {
+.dash, .notes, .foot {
   max-width: var(--maxw);
   margin-left: auto;
   margin-right: auto;
 }
 
 /* --------------------------------------------------------------------------
-   Hero — 한 줄 슬림 헤더: 제목+부제 인라인 (KPI 칩은 지도 아래로 이동)
+   Hero — 좌측 컬럼 최상단 한 줄 헤더: 제목+부제 인라인
+   (전체 폭 밴드 제거 — 우측 패널이 페이지 상단부터 세로 공간 점유)
    -------------------------------------------------------------------------- */
 .hero {
-  padding: 9px 0 8px;
-  border-bottom: 1px solid var(--line);
-}
-
-.hero-title {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: 2px 10px;
   min-width: 0;
+  padding: 2px 2px 0;
 }
 
 .hero h1 {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.2rem;
   font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.25;
@@ -67,13 +64,7 @@ body {
 .hero .sub {
   margin: 0;
   color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.hero .sub #kpi-n {
-  color: var(--accent);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-size: 0.83rem;
 }
 
 /* --------------------------------------------------------------------------
@@ -143,7 +134,7 @@ body {
   width: 100%;
   aspect-ratio: 1 / 1;
   /* 낮은 화면(1366×768 등)에서는 정사각형 대신 화면에 맞게 클램프
-     (150px → 250px: 지도 위 스위치 + 아래 KPI 스트립 몫) */
+     (250px: 지도 위 헤더+스위치 + 아래 KPI 스트립 몫) */
   max-height: calc(100vh - 250px);
   min-height: 420px;
   border: 1px solid var(--line);
@@ -295,26 +286,25 @@ body {
   outline-offset: 2px;
 }
 
-/* 보조 버튼(전체 선택/해제): 회색 소형 */
-.controls button.ctl-aux {
-  font-size: 0.75rem;
-  padding: 5px 10px;
-  color: var(--muted);
-  background: transparent;
-  border-color: transparent;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  text-decoration-color: var(--line);
+/* 요일 줄: 7버튼 + "전체 요일" 토글을 반드시 한 줄에 수납 (소형 정폭 버튼) */
+.ctl-days { flex-wrap: nowrap; gap: 4px; }
+
+.ctl-days button[data-day] {
+  flex: 1 1 30px;
+  min-width: 0;
+  max-width: 34px;
+  padding: 6px 0;
+  font-size: 0.78rem;
+  text-align: center;
 }
 
-.controls button.ctl-aux:hover {
-  color: var(--accent);
-  background: transparent;
-  border-color: transparent;
-  text-decoration-color: var(--accent);
+.ctl-days #days-all {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  margin-left: 2px;
 }
 
-/* 전체 시간 토글: 요일 보조 버튼과 같은 계열의 소형 pill 토글 */
+/* 전체 시간·전체 요일 토글: 다른 토글과 같은 계열의 소형 pill */
 .controls button.ctl-toggle {
   font-size: 0.78rem;
   padding: 6px 11px;
@@ -443,8 +433,8 @@ body {
 @media (max-width: 560px) {
   body { padding: 0 14px 40px; }
 
-  .hero { padding-top: 18px; }
-  .hero h1 { font-size: 1.25rem; }
+  .hero { padding-top: 10px; }
+  .hero h1 { font-size: 1.15rem; }
 
   .kpi { padding: 4px 10px; gap: 6px; }
 

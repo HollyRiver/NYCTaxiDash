@@ -190,7 +190,6 @@ window.updateFlowLayer = async function () {
 // ---------- KPI ----------
 function fillKpis() {
   const fmt = (x) => x.toLocaleString("en-US");
-  document.getElementById("kpi-n").textContent = fmt(META.n);
   document.getElementById("kpi-total").textContent = fmt(META.n);
   document.getElementById("kpi-speed").textContent = META.avg_speed + " km/h";
   document.getElementById("kpi-slowest").textContent = META.slowest_hour + "시";
@@ -453,23 +452,29 @@ window.__refresh = refresh;
 // ---------- 컨트롤 바인딩 ----------
 function bindControls() {
   const dayBtns = document.querySelectorAll(".ctl-days button[data-day]");
+  const daysAllBtn = document.getElementById("days-all");
+
+  // "전체 요일" 토글 상태 동기화: 7개 전부 선택이면 .on, 하나라도 빠지면 .off
+  const syncDaysAll = () => daysAllBtn.classList.toggle("on", state.days.size === 7);
 
   dayBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       const d = +btn.dataset.day;
       if (state.days.has(d)) { state.days.delete(d); btn.classList.remove("on"); }
       else { state.days.add(d); btn.classList.add("on"); }
+      syncDaysAll();
       refresh();
     });
   });
-  // 전체 선택 토글: 7개 미만 선택(0개 포함) → 전체 선택, 7개 전체 선택 → 전체 해제
-  document.getElementById("days-all").addEventListener("click", () => {
+  // 전체 요일 토글: 7개 미만 선택(0개 포함) → 전체 선택, 7개 전체 선택 → 전체 해제
+  daysAllBtn.addEventListener("click", () => {
     if (state.days.size === 7) {
       state.days.clear();
       dayBtns.forEach((b) => b.classList.remove("on"));
     } else {
       dayBtns.forEach((b) => { state.days.add(+b.dataset.day); b.classList.add("on"); });
     }
+    syncDaysAll();
     refresh();
   });
 

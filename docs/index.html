@@ -8,15 +8,12 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<header class="hero">
-  <div class="hero-title">
-    <h1>NYC Taxi Traffic</h1>
-    <p class="sub">2016년 상반기 표본 <span id="kpi-n">—</span>건으로 본 "언제, 어디서 막히는가"</p>
-  </div>
-</header>
-
 <section class="dash">
   <main class="map-col">
+    <header class="hero">
+      <h1>NYC Taxi Traffic</h1>
+      <p class="sub">2016년 상반기 택시 이용 정보 기반 교통량 시각화</p>
+    </header>
     <div class="layer-switch" role="tablist">
       <button data-layer="flow" class="on">도로 플로우</button><button data-layer="hex">헥스빈</button>
     </div>
@@ -43,7 +40,7 @@
       <div class="ctl-group ctl-days" hidden>
         <span class="ctl-label">요일</span>
         <button data-day="0" class="on">월</button><button data-day="1" class="on">화</button><button data-day="2" class="on">수</button><button data-day="3" class="on">목</button><button data-day="4" class="on">금</button><button data-day="5" class="on">토</button><button data-day="6" class="on">일</button>
-        <button id="days-all" class="ctl-aux">전체 선택</button>
+        <button id="days-all" class="ctl-toggle on">전체 요일</button>
       </div>
       <div class="ctl-group ctl-hour" hidden>
         <span class="ctl-label">시간</span>
