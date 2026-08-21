@@ -64,6 +64,61 @@ const FILL_COLOR = {
     5, "#a63232", 12, "#d99a4e", 20, "#7f9cc9", 35, "#2e7d52"],
 };
 
+// ---------- 플로우 레이어 ----------
+const flowCache = {}; // wp+band → GeoJSON (lazy fetch)
+let flowReq = 0;      // 최신 요청만 반영하기 위한 시퀀스
+
+const FLOW_LINE_COLOR = ["interpolate", ["linear"], ["get", "n"],
+  3, "#9db4d6", 30, "#345995", 120, "#16294d"];
+const FLOW_LINE_WIDTH = ["interpolate", ["linear"], ["get", "n"],
+  3, 0.5, 20, 1.6, 60, 3, 150, 5];
+
+// 플로우 모드에서는 요일·시간·지표 필터가 무의미 → disabled 시각 처리
+function setHexControlsDisabled(disabled) {
+  for (const sel of [".ctl-days", ".ctl-hour", ".ctl-metric"]) {
+    const grp = document.querySelector(sel);
+    if (!grp) continue;
+    grp.classList.toggle("disabled", disabled);
+    grp.querySelectorAll("button, input").forEach((el) => { el.disabled = disabled; });
+  }
+}
+
+window.updateFlowLayer = async function () {
+  const flowMode = state.layer === "flow";
+  setHexControlsDisabled(flowMode);
+  if (!mapReady || !map.getLayer("flow-lines")) return;
+
+  if (!flowMode) {
+    map.setLayoutProperty("flow-lines", "visibility", "none");
+    map.setLayoutProperty("hex", "visibility", "visible");
+    return;
+  }
+
+  map.setLayoutProperty("hex", "visibility", "none");
+  map.setLayoutProperty("flow-lines", "visibility", "visible");
+
+  const key = state.flowWp + state.flowBand;
+  const seq = ++flowReq;
+  if (!flowCache[key]) {
+    const note = document.querySelector(".ctl-note");
+    if (note && !note.dataset.orig) note.dataset.orig = note.textContent;
+    if (note) note.textContent = "로드 중…";
+    try {
+      flowCache[key] = await fetch(`data/flow_${state.flowWp}_${state.flowBand}.geojson`).then((r) => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      });
+      if (note) note.textContent = note.dataset.orig;
+    } catch (e) {
+      console.error("플로우 로드 실패:", e);
+      if (note) note.textContent = "플로우 데이터 로드 실패";
+      return;
+    }
+  }
+  if (seq !== flowReq) return; // 그 사이 다른 슬라이스가 요청됨
+  map.getSource("flow").setData(flowCache[key]);
+};
+
 // ---------- KPI ----------
 function fillKpis() {
   const fmt = (x) => x.toLocaleString("en-US");
@@ -110,6 +165,20 @@ function initMap() {
       },
     });
 
+    // 도로 플로우 (초기엔 빈 컬렉션·숨김 — updateFlowLayer가 관리)
+    map.addSource("flow", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({
+      id: "flow-lines",
+      type: "line",
+      source: "flow",
+      layout: { "line-cap": "round", "line-join": "round", "visibility": "none" },
+      paint: {
+        "line-color": FLOW_LINE_COLOR,
+        "line-width": FLOW_LINE_WIDTH,
+        "line-opacity": 0.85,
+      },
+    });
+
     // 랜드마크 라벨
     map.addSource("landmarks", { type: "geojson", data: LANDMARKS });
     try {
@@ -150,8 +219,17 @@ function initMap() {
       map.getCanvas().style.cursor = "";
       popup.remove();
     });
+    map.on("mousemove", "flow-lines", (e) => {
+      map.getCanvas().style.cursor = "pointer";
+      popup.setLngLat(e.lngLat).setHTML(`통행 ${e.features[0].properties.n}회`).addTo(map);
+    });
+    map.on("mouseleave", "flow-lines", () => {
+      map.getCanvas().style.cursor = "";
+      popup.remove();
+    });
 
     mapReady = true;
+    if (state.layer === "flow") window.updateFlowLayer(); // 로드 전에 플로우로 전환한 경우 반영
   });
 }
 
@@ -208,7 +286,25 @@ function bindControls() {
       state.layer = btn.dataset.layer;
       document.querySelectorAll(".ctl-layer button[data-layer]").forEach((b) => b.classList.toggle("on", b === btn));
       document.querySelector(".ctl-flow").hidden = state.layer !== "flow";
-      if (window.updateFlowLayer) window.updateFlowLayer(); // Task 7에서 구현
+      if (window.updateFlowLayer) window.updateFlowLayer();
+    });
+  });
+
+  // 플로우 슬라이스: 주중/주말 × 시간대
+  document.querySelectorAll(".ctl-flow button[data-wp]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (state.flowWp === btn.dataset.wp) return;
+      state.flowWp = btn.dataset.wp;
+      document.querySelectorAll(".ctl-flow button[data-wp]").forEach((b) => b.classList.toggle("on", b === btn));
+      window.updateFlowLayer();
+    });
+  });
+  document.querySelectorAll(".ctl-flow button[data-band]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (state.flowBand === +btn.dataset.band) return;
+      state.flowBand = +btn.dataset.band;
+      document.querySelectorAll(".ctl-flow button[data-band]").forEach((b) => b.classList.toggle("on", b === btn));
+      window.updateFlowLayer();
     });
   });
 }

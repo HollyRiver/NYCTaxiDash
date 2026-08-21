@@ -122,6 +122,15 @@ body {
 
 .ctl-group[hidden] { display: none; }
 
+/* 플로우 모드에서 무의미해지는 그룹(요일·시간·지표)의 disabled 시각 처리 */
+.ctl-group.disabled { opacity: 0.45; }
+
+.ctl-group.disabled button,
+.ctl-group.disabled input {
+  cursor: default;
+  pointer-events: none;
+}
+
 .ctl-label {
   min-width: 44px;
   font-size: 0.78rem;
