@@ -1,8 +1,10 @@
-"""트립별 도로망 최단경로 → 세그먼트 통행량 GeoJSON 8슬라이스.
+"""트립별 도로망 최단경로 → 세그먼트 통행량 GeoJSON 15슬라이스.
 
-슬라이스: 주중(wd)/주말(we) × 시간대 0:새벽(0-6) 1:오전(6-12) 2:오후(12-18) 3:저녁(18-24)
+기본 8장: 주중(wd)/주말(we) × 시간대 0:새벽(0-6) 1:오전(6-12) 2:오후(12-18) 3:저녁(18-24)
+합성 7장: all×{0..3} (wd+we 합산), {wd,we}×all (band 합산), all×all (전부 합산)
+합성 슬라이스는 MIN_COUNT=3 기본이되 2.5MB 초과 시 그 파일만 컷을 5, 7…로 올려 수납.
 한계(대시보드에 명시): 최단경로는 실주행 경로가 아닌 추정.
-실행: python scripts/build_flows.py [MIN_COUNT]  (그래프 다운로드 포함 수 분~수십 분)
+실행: python scripts/build_flows.py [MIN_COUNT]  (pkl 캐시 히트 시 그래프 로드 포함 수 분)
 osmnx 2.x API 기준: graph_from_bbox(bbox=(left, bottom, right, top)), ox.routing.shortest_path.
 """
 import json
@@ -18,6 +20,7 @@ from build_data import load_clean
 
 BBOX = (-74.05, 40.60, -73.75, 40.88)  # (west, south, east, north) 핵심 운행 대역
 MIN_COUNT = 3          # 이 미만 통행 세그먼트는 출력 제외 (용량·노이즈 컷)
+MAX_BYTES = int(2.5 * 1024 * 1024)  # 합성 슬라이스 파일 상한 — 초과 시 그 파일만 컷 상향
 CACHE_GRAPH = "cache/nyc_drive.graphml"
 CACHE_COUNTS = "cache/segment_counts.pkl"  # 라우팅 결과 캐시 (MIN_COUNT 재조정용)
 CACHE_ROUTE_KM = "cache/route_km.json"     # 트립별 도로망 최단경로 거리 (build_data.py에서 조인)
@@ -62,6 +65,37 @@ def build_counters(G):
     print(f"routed {len(route_km['index'])}/{len(df)} trips")
     return counters, route_km
 
+def edge_coords(G, u, v, _cache={}):
+    """세그먼트 (u, v)의 LineString 좌표 — 슬라이스 15장에서 재사용하므로 메모이즈."""
+    key = (u, v)
+    if key in _cache:
+        return _cache[key]
+    data = min(G.get_edge_data(u, v).values(), key=lambda d: d.get("length", 0))
+    if "geometry" in data:
+        coords = [[round(x, 5), round(y, 5)] for x, y in data["geometry"].coords]
+    else:
+        coords = [[round(G.nodes[u]["x"], 5), round(G.nodes[u]["y"], 5)],
+                  [round(G.nodes[v]["x"], 5), round(G.nodes[v]["y"], 5)]]
+    _cache[key] = coords
+    return coords
+
+def write_slice(G, counter, path, min_count, max_bytes=None):
+    """Counter → GeoJSON 출력. max_bytes 지정 시 초과하면 컷을 +2씩 올려 재출력.
+
+    반환: (세그먼트 수, 파일 크기, 실제 적용 컷, n 최대값)
+    """
+    n_max = max(counter.values(), default=0)
+    while True:
+        feats = [{"type": "Feature", "properties": {"n": n},
+                  "geometry": {"type": "LineString", "coordinates": edge_coords(G, u, v)}}
+                 for (u, v), n in counter.items() if n >= min_count]
+        with open(path, "w") as f:
+            json.dump({"type": "FeatureCollection", "features": feats}, f, separators=(",", ":"))
+        size = os.path.getsize(path)
+        if max_bytes is None or size <= max_bytes:
+            return len(feats), size, min_count, n_max
+        min_count += 2
+
 def main(min_count=MIN_COUNT):
     G = get_graph()
     if os.path.exists(CACHE_COUNTS) and os.path.exists(CACHE_ROUTE_KM):
@@ -77,26 +111,27 @@ def main(min_count=MIN_COUNT):
             json.dump(route_km, f, separators=(",", ":"))
         print(CACHE_ROUTE_KM, "written,", len(route_km["index"]), "trips")
 
-    n_max = max((max(c.values()) for c in counters.values() if c), default=0)
+    # 기본 8장: wd/we × band 0..3
     for (w, b), counter in counters.items():
-        feats = []
-        for (u, v), n in counter.items():
-            if n < min_count:
-                continue
-            data = min(G.get_edge_data(u, v).values(), key=lambda d: d.get("length", 0))
-            if "geometry" in data:
-                coords = [[round(x, 5), round(y, 5)] for x, y in data["geometry"].coords]
-            else:
-                coords = [[round(G.nodes[u]["x"], 5), round(G.nodes[u]["y"], 5)],
-                          [round(G.nodes[v]["x"], 5), round(G.nodes[v]["y"], 5)]]
-            feats.append({"type": "Feature", "properties": {"n": n},
-                          "geometry": {"type": "LineString", "coordinates": coords}})
-        out = {"type": "FeatureCollection", "features": feats}
         path = f"docs/data/flow_{w}_{b}.geojson"
-        with open(path, "w") as f:
-            json.dump(out, f, separators=(",", ":"))
-        print(path, len(feats), "segments,", os.path.getsize(path), "bytes")
-    print("max segment count n =", n_max)
+        nseg, size, cut, n_max = write_slice(G, counter, path, min_count)
+        print(f"{path} {nseg} segments, {size} bytes, cut={cut}, n_max={n_max}")
+
+    # 합성 7장: all×band 4장 + wp×all 2장 + all×all 1장 (2.5MB 초과 시 컷 상향)
+    composites = {}
+    for b in range(4):
+        composites[("all", b)] = counters[("wd", b)] + counters[("we", b)]
+    for w in ("wd", "we"):
+        c = Counter()
+        for b in range(4):
+            c += counters[(w, b)]
+        composites[(w, "all")] = c
+    composites[("all", "all")] = composites[("wd", "all")] + composites[("we", "all")]
+
+    for (w, b), counter in composites.items():
+        path = f"docs/data/flow_{w}_{b}.geojson"
+        nseg, size, cut, n_max = write_slice(G, counter, path, min_count, max_bytes=MAX_BYTES)
+        print(f"{path} {nseg} segments, {size} bytes, cut={cut}, n_max={n_max}")
 
 if __name__ == "__main__":
     main(int(sys.argv[1]) if len(sys.argv) > 1 else MIN_COUNT)

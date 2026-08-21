@@ -95,20 +95,51 @@ function currentFillColor() {
 const flowCache = {}; // wp+band → GeoJSON (lazy fetch)
 let flowReq = 0;      // 최신 요청만 반영하기 위한 시퀀스
 
-// "두꺼울수록 붉게, 얇을수록 파랗고 흐리게" — 통행량 청→적 발산 색 + 투명도 그라데이션
+// "두꺼울수록 붉게, 얇을수록 파랗고 흐리게" — 통행량 청→적 발산 색 + 투명도 그라데이션.
+// 고정 스톱이면 "전체×전체"(n 수백)에서 화면이 포화 → 슬라이스별 n 분위수(p50/p85/p99)로
+// 스톱을 동적 구성 (헥스빈 buildCountColor와 같은 패턴). 아래 상수는 초기(빈 데이터) 기본값.
+const FLOW_PALETTE = ["#7fa3d1", "#8a7fb8", "#b0596a", "#c73030"];
+const FLOW_WIDTHS = [0.5, 1.6, 3, 5];
 const FLOW_LINE_COLOR = ["interpolate", ["linear"], ["get", "n"],
-  3, "#7fa3d1", 20, "#8a7fb8", 60, "#b0596a", 150, "#c73030"];
+  3, FLOW_PALETTE[0], 20, FLOW_PALETTE[1], 60, FLOW_PALETTE[2], 150, FLOW_PALETTE[3]];
 const FLOW_LINE_WIDTH = ["interpolate", ["linear"], ["get", "n"],
-  3, 0.5, 20, 1.6, 60, 3, 150, 5];
+  3, FLOW_WIDTHS[0], 20, FLOW_WIDTHS[1], 60, FLOW_WIDTHS[2], 150, FLOW_WIDTHS[3]];
 const FLOW_LINE_OPACITY = ["interpolate", ["linear"], ["get", "n"],
   3, 0.45, 30, 0.75, 100, 0.95];
+
+function buildFlowPaint(fc) {
+  const ns = fc.features.map((f) => f.properties.n).sort((a, b) => a - b);
+  const lo = ns.length ? ns[0] : 3;
+  const hi = ns.length ? ns[ns.length - 1] : 150;
+  if (ns.length >= 4 && hi > lo) {
+    const stops = [lo, quantileSorted(ns, 0.5), quantileSorted(ns, 0.85), quantileSorted(ns, 0.99)];
+    if (stops.every((s, i) => i === 0 || s > stops[i - 1])) {
+      return {
+        color: ["interpolate", ["linear"], ["get", "n"],
+          stops[0], FLOW_PALETTE[0], stops[1], FLOW_PALETTE[1],
+          stops[2], FLOW_PALETTE[2], stops[3], FLOW_PALETTE[3]],
+        width: ["interpolate", ["linear"], ["get", "n"],
+          stops[0], FLOW_WIDTHS[0], stops[1], FLOW_WIDTHS[1],
+          stops[2], FLOW_WIDTHS[2], stops[3], FLOW_WIDTHS[3]],
+        opacity: ["interpolate", ["linear"], ["get", "n"],
+          stops[0], 0.45, stops[1], 0.75, stops[3], 0.95],
+      };
+    }
+  }
+  // 퇴화 케이스(피처 적거나 스톱 겹침): [lo, hi] 2스톱 폴백으로 최소 대비 보장
+  const top = Math.max(hi, lo + 1);
+  return {
+    color: ["interpolate", ["linear"], ["get", "n"], lo, FLOW_PALETTE[0], top, FLOW_PALETTE[3]],
+    width: ["interpolate", ["linear"], ["get", "n"], lo, FLOW_WIDTHS[0], top, FLOW_WIDTHS[3]],
+    opacity: ["interpolate", ["linear"], ["get", "n"], lo, 0.45, top, 0.95],
+  };
+}
 
 // 모드별 컨트롤 표시 전환: 플로우 → .ctl-flow만, 헥스 → 요일/시간/지표만
 // (헥스 모드 내 "전체 시간" 토글의 슬라이더 disabled 상태는 setHourAll이 별도 관리)
 function syncModeControls() {
   const flowMode = state.layer === "flow";
-  const flowGrp = document.querySelector(".ctl-flow");
-  if (flowGrp) flowGrp.hidden = !flowMode;
+  document.querySelectorAll(".ctl-flow").forEach((grp) => { grp.hidden = !flowMode; });
   for (const sel of [".ctl-days", ".ctl-hour", ".ctl-metric"]) {
     const grp = document.querySelector(sel);
     if (grp) grp.hidden = flowMode;
@@ -149,6 +180,11 @@ window.updateFlowLayer = async function () {
   }
   if (seq !== flowReq) return; // 그 사이 다른 슬라이스가 요청됨
   map.getSource("flow").setData(flowCache[key]);
+  // 슬라이스별 동적 스케일 — n 분포가 슬라이스마다 크게 달라(최대 수십~수백) 분위수로 재산정
+  const paint = buildFlowPaint(flowCache[key]);
+  map.setPaintProperty("flow-lines", "line-color", paint.color);
+  map.setPaintProperty("flow-lines", "line-width", paint.width);
+  map.setPaintProperty("flow-lines", "line-opacity", paint.opacity);
 };
 
 // ---------- KPI ----------
@@ -292,12 +328,14 @@ function initMap() {
   map.addControl(new ResetViewControl(), "top-right");
 
   map.on("load", () => {
-    // 데이터 전체 bbox로 초기 뷰 — animate:false는 동기(jumpTo)라 직후 캡처 가능.
+    // 데이터 전체 bbox fitBounds 후 줌 +1 (센터 유지) — bbox 전체보다 "한 번 확대된"
+    // 시작 화면이 요구사항. animate:false는 동기(jumpTo)라 직후 캡처 가능.
     // 리셋 버튼(⟲)도 이 실측 시점으로 복원.
     try {
       const bounds = computeDataBounds();
       if (bounds) {
         map.fitBounds(bounds, { padding: 24, animate: false });
+        map.setZoom(map.getZoom() + 1);
         INIT_VIEW = { center: map.getCenter(), zoom: map.getZoom() };
       }
     } catch (e) {
@@ -424,13 +462,14 @@ function bindControls() {
       refresh();
     });
   });
+  // 전체 선택 토글: 7개 미만 선택(0개 포함) → 전체 선택, 7개 전체 선택 → 전체 해제
   document.getElementById("days-all").addEventListener("click", () => {
-    dayBtns.forEach((b) => { state.days.add(+b.dataset.day); b.classList.add("on"); });
-    refresh();
-  });
-  document.getElementById("days-none").addEventListener("click", () => {
-    state.days.clear();
-    dayBtns.forEach((b) => b.classList.remove("on"));
+    if (state.days.size === 7) {
+      state.days.clear();
+      dayBtns.forEach((b) => b.classList.remove("on"));
+    } else {
+      dayBtns.forEach((b) => { state.days.add(+b.dataset.day); b.classList.add("on"); });
+    }
     refresh();
   });
 
@@ -483,7 +522,8 @@ function bindControls() {
     });
   });
 
-  // 플로우 슬라이스: 주중/주말 × 시간대
+  // 플로우 슬라이스: 요일 범위(주중/주말/전체) × 시간대(4구간+전체)
+  // flowWp는 "wd"|"we"|"all", flowBand는 0..3 숫자 또는 "all" 문자열
   document.querySelectorAll(".ctl-flow button[data-wp]").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (state.flowWp === btn.dataset.wp) return;
@@ -494,8 +534,9 @@ function bindControls() {
   });
   document.querySelectorAll(".ctl-flow button[data-band]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (state.flowBand === +btn.dataset.band) return;
-      state.flowBand = +btn.dataset.band;
+      const val = btn.dataset.band === "all" ? "all" : +btn.dataset.band;
+      if (state.flowBand === val) return;
+      state.flowBand = val;
       document.querySelectorAll(".ctl-flow button[data-band]").forEach((b) => b.classList.toggle("on", b === btn));
       window.updateFlowLayer();
     });

@@ -1,8 +1,8 @@
 /* ==========================================================================
    NYC Taxi Traffic — dashboard layout
    톤: 포트폴리오(hollyriver.github.io)와 통일된 잉크+스틸블루 미니멀
-   구조: 슬림 헤더(제목+KPI 칩)
-         → [좌: 정방형 지도 | 우: 캡슐 스위치+컨트롤+시간대 차트+히트맵]
+   구조: 슬림 헤더(제목+부제 한 줄)
+         → [좌: 캡슐 스위치+정방형 지도+KPI 칩 스트립 | 우: 컨트롤+시간대 차트+히트맵]
          → 관찰/푸터
    ========================================================================== */
 
@@ -40,15 +40,10 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   Hero — 한 줄 슬림 헤더: 제목+부제 인라인, 우측 KPI 칩 스트립
+   Hero — 한 줄 슬림 헤더: 제목+부제 인라인 (KPI 칩은 지도 아래로 이동)
    -------------------------------------------------------------------------- */
 .hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px 20px;
-  padding: 14px 0 12px;
+  padding: 9px 0 8px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -82,17 +77,19 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   KPI — 대형 카드 대신 소형 인라인 칩
+   KPI — 지도 아래 가로 스트립 (소형 칩 4개, 지도 폭에 균등 분배)
    -------------------------------------------------------------------------- */
 .kpis {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .kpi {
   display: flex;
   align-items: baseline;
+  justify-content: center;
+  flex: 1 1 0;
   gap: 8px;
   padding: 5px 12px;
   border: 1px solid var(--line);
@@ -131,16 +128,23 @@ body {
   grid-template-columns: minmax(0, 62fr) minmax(0, 38fr);
   gap: 16px;
   align-items: start;
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
-.map-col { min-width: 0; }
+/* 좌측 컬럼: 캡슐 스위치 → 지도 → KPI 스트립 세로 스택 */
+.map-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
 #map {
   width: 100%;
   aspect-ratio: 1 / 1;
-  /* 낮은 화면(1366×768 등)에서는 정사각형 대신 화면에 맞게 클램프 */
-  max-height: calc(100vh - 150px);
+  /* 낮은 화면(1366×768 등)에서는 정사각형 대신 화면에 맞게 클램프
+     (150px → 250px: 지도 위 스위치 + 아래 KPI 스트립 몫) */
+  max-height: calc(100vh - 250px);
   min-height: 420px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -159,7 +163,7 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   Layer switch — 패널 최상단 캡슐형 세그먼트 컨트롤 (플로우 | 헥스빈)
+   Layer switch — 좌측 컬럼 상단(지도 위) 캡슐형 세그먼트 컨트롤 (플로우 | 헥스빈)
    -------------------------------------------------------------------------- */
 .layer-switch {
   display: flex;
@@ -220,8 +224,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* 플로우/헥스 세트 중 큰 쪽(헥스 3그룹, 실측 164.7px)으로 고정 —
-     모드 전환 시 아래 차트들이 밀리지 않게 (ref/verify-panel.mjs로 실측) */
+  /* 플로우(요일 범위+시간대 2줄)/헥스(요일+시간+지표 3줄) 중 큰 쪽으로 고정 —
+     모드 전환 시 아래 차트들이 밀리지 않게 (ref/verify4.mjs로 실측) */
   min-height: 166px;
 }
 
@@ -362,9 +366,9 @@ body {
   color: var(--muted);
 }
 
-/* 우측 패널의 시간대별 트립 수: compact */
+/* 우측 패널의 시간대별 트립 수: 스위치가 지도 위로 빠져 확보된 세로만큼 소폭 상향 */
 #chart-hour {
-  height: 200px;
+  height: 250px;
   background: var(--bg-soft);
   border-radius: 8px;
 }
