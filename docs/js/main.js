@@ -2,7 +2,7 @@
 "use strict";
 
 // ---------- 상태 ----------
-const state = { days: new Set([0, 1, 2, 3, 4, 5, 6]), hour: null, metric: "count", layer: "hex", flowWp: "wd", flowBand: 1 };
+const state = { days: new Set([0, 1, 2, 3, 4, 5, 6]), hour: null, metric: "count", layer: "flow", flowWp: "wd", flowBand: 3 };
 
 let TRIPS = null;
 let META = null;
@@ -75,11 +75,15 @@ const FLOW_LINE_WIDTH = ["interpolate", ["linear"], ["get", "n"],
 
 // 플로우 모드에서는 요일·시간·지표 필터가 무의미 → disabled 시각 처리
 function setHexControlsDisabled(disabled) {
+  const hourAllOn = document.getElementById("hour-all")?.classList.contains("on");
   for (const sel of [".ctl-days", ".ctl-hour", ".ctl-metric"]) {
     const grp = document.querySelector(sel);
     if (!grp) continue;
     grp.classList.toggle("disabled", disabled);
-    grp.querySelectorAll("button, input").forEach((el) => { el.disabled = disabled; });
+    grp.querySelectorAll("button, input").forEach((el) => {
+      // 슬라이더는 "전체 시간" 토글이 켜져 있으면 hex 모드로 돌아와도 disabled 유지
+      el.disabled = disabled || (el.id === "hour" && hourAllOn);
+    });
   }
 }
 
@@ -193,15 +197,42 @@ window.updateCharts = function () {
 };
 
 // ---------- 지도 ----------
+const INIT_VIEW = { center: [-73.95, 40.74], zoom: 10.7 };
+
+// 초기 시점 리셋 커스텀 컨트롤 (MapLibre IControl)
+class ResetViewControl {
+  onAdd(m) {
+    this._map = m;
+    this._container = document.createElement("div");
+    this._container.className = "maplibregl-ctrl maplibregl-ctrl-group";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "map-reset-btn";
+    btn.title = "초기 화면으로";
+    btn.setAttribute("aria-label", "초기 화면으로");
+    btn.textContent = "⟲";
+    btn.addEventListener("click", () => {
+      this._map.easeTo({ center: INIT_VIEW.center, zoom: INIT_VIEW.zoom, duration: 600 });
+    });
+    this._container.appendChild(btn);
+    return this._container;
+  }
+  onRemove() {
+    this._container.remove();
+    this._map = null;
+  }
+}
+
 function initMap() {
   map = new maplibregl.Map({
     container: "map",
     style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-    center: [-73.95, 40.74],
-    zoom: 10.7,
+    center: INIT_VIEW.center,
+    zoom: INIT_VIEW.zoom,
     attributionControl: true,
   });
   map.addControl(new maplibregl.NavigationControl(), "top-right");
+  map.addControl(new ResetViewControl(), "top-right");
 
   map.on("load", () => {
     // 수변·공원 대비 강화 (스타일별 레이어 id가 다르므로 탐색해 적용)
@@ -325,12 +356,34 @@ function bindControls() {
     refresh();
   });
 
+  // 시간: "전체 시간" 토글 + 0–23 슬라이더
   const hourInput = document.getElementById("hour");
   const hourLabel = document.getElementById("hour-label");
+  const hourAllBtn = document.getElementById("hour-all");
+
+  function setHourAll(on) {
+    hourAllBtn.classList.toggle("on", on);
+    hourInput.disabled = on;
+    if (on) {
+      state.hour = null;
+      hourLabel.textContent = "";
+    } else {
+      state.hour = +hourInput.value;
+      hourLabel.textContent = hourInput.value + "시";
+    }
+    refresh();
+  }
+
+  hourAllBtn.addEventListener("click", () => {
+    setHourAll(!hourAllBtn.classList.contains("on"));
+  });
+
   hourInput.addEventListener("input", () => {
+    // 슬라이더 조작 시 토글은 off 상태 유지
+    hourAllBtn.classList.remove("on");
     const h = +hourInput.value;
-    if (h < 0) { state.hour = null; hourLabel.textContent = "전체 시간"; }
-    else { state.hour = h; hourLabel.textContent = h + "시"; }
+    state.hour = h;
+    hourLabel.textContent = h + "시";
     refresh();
   });
 
@@ -382,6 +435,7 @@ async function init() {
   TRIPS = trips; META = meta; LANDMARKS = landmarks;
   fillKpis();
   bindControls();
+  setHexControlsDisabled(state.layer === "flow"); // 플로우 기본 — 헥스 컨트롤 초기 disabled
 
   // 셀프테스트 훅: ?selftest 시 집계 요약을 title에 기록 (헤드리스 검증용)
   if (location.search.includes("selftest")) {
@@ -402,8 +456,9 @@ async function init() {
     map.on("error", (e) => errs.push(e.error && e.error.message || String(e)));
     map.on("idle", () => {
       const hex = map.getLayer("hex") ? map.queryRenderedFeatures({ layers: ["hex"] }).length : -1;
+      const flow = map.getLayer("flow-lines") ? map.queryRenderedFeatures({ layers: ["flow-lines"] }).length : -1;
       const lm = map.getLayer("landmarks") ? map.queryRenderedFeatures({ layers: ["landmarks"] }).length : -1;
-      document.title = `MAPTEST loaded=${map.loaded()} hex=${hex} lm=${lm} err=${errs.slice(0, 2).join(";") || "none"}`;
+      document.title = `MAPTEST loaded=${map.loaded()} hex=${hex} flow=${flow} lm=${lm} err=${errs.slice(0, 2).join(";") || "none"}`;
     });
   }
 }
