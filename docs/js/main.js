@@ -103,23 +103,21 @@ const FLOW_LINE_WIDTH = ["interpolate", ["linear"], ["get", "n"],
 const FLOW_LINE_OPACITY = ["interpolate", ["linear"], ["get", "n"],
   3, 0.45, 30, 0.75, 100, 0.95];
 
-// 플로우 모드에서는 요일·시간·지표 필터가 무의미 → disabled 시각 처리
-function setHexControlsDisabled(disabled) {
-  const hourAllOn = document.getElementById("hour-all")?.classList.contains("on");
+// 모드별 컨트롤 표시 전환: 플로우 → .ctl-flow만, 헥스 → 요일/시간/지표만
+// (헥스 모드 내 "전체 시간" 토글의 슬라이더 disabled 상태는 setHourAll이 별도 관리)
+function syncModeControls() {
+  const flowMode = state.layer === "flow";
+  const flowGrp = document.querySelector(".ctl-flow");
+  if (flowGrp) flowGrp.hidden = !flowMode;
   for (const sel of [".ctl-days", ".ctl-hour", ".ctl-metric"]) {
     const grp = document.querySelector(sel);
-    if (!grp) continue;
-    grp.classList.toggle("disabled", disabled);
-    grp.querySelectorAll("button, input").forEach((el) => {
-      // 슬라이더는 "전체 시간" 토글이 켜져 있으면 hex 모드로 돌아와도 disabled 유지
-      el.disabled = disabled || (el.id === "hour" && hourAllOn);
-    });
+    if (grp) grp.hidden = flowMode;
   }
 }
 
 window.updateFlowLayer = async function () {
   const flowMode = state.layer === "flow";
-  setHexControlsDisabled(flowMode);
+  syncModeControls();
   if (!mapReady || !map.getLayer("flow-lines")) return;
 
   if (!flowMode) {
@@ -172,11 +170,11 @@ const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
 function renderHeatChart() {
   if (!window.Plotly) return;
 
-  // 24열×7행 셀이 정사각형에 가깝도록 컨테이너 높이를 플롯 폭에 맞춰 산정
-  // (좌우 여백 l30+r4 + 컬러바 ~66px ≈ 100, 상하 여백 t8+b26 = 34)
+  // 우측 패널 폭(~420px) 기준 compact: 셀 정방 비율을 따르되 최소 가독선 150px 확보
+  // (좌우 여백 l26+r4 + 세로 컬러바(thickness 8 + 틱) ~36px ≈ 66, 상하 여백 t8+b24 = 32)
   const el = document.getElementById("chart-heat");
-  const w = el.clientWidth || 1100;
-  el.style.height = Math.max(200, Math.round((w - 100) * 7 / 24) + 34) + "px";
+  const w = el.clientWidth || 420;
+  el.style.height = Math.max(150, Math.round((w - 66) * 7 / 24) + 32) + "px";
 
   const { dow, hr, v } = TRIPS;
   const sum = Array.from({ length: 7 }, () => new Array(24).fill(0));
@@ -194,15 +192,15 @@ function renderHeatChart() {
     y: DAY_LABELS,
     customdata: cnt,
     colorscale: [[0, "#c73030"], [0.4, "#d99a4e"], [0.75, "#7f9cc9"], [1, "#2e5f95"]],
-    colorbar: { title: { text: "km/h", side: "top" }, thickness: 10, outlinewidth: 0, tickfont: { size: 10 } },
+    colorbar: { title: { text: "km/h", side: "top", font: { size: 9 } }, thickness: 8, outlinewidth: 0, tickfont: { size: 9 } },
     hovertemplate: "%{y}요일 %{x}시 · 평균 %{z} km/h · 표본 %{customdata}건<extra></extra>",
   }], {
-    margin: { l: 30, r: 4, t: 8, b: 26 },
-    font: { family: CHART_FONT, size: 11, color: "#1c1c1e" },
+    margin: { l: 26, r: 4, t: 8, b: 24 },
+    font: { family: CHART_FONT, size: 10, color: "#1c1c1e" },
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
-    xaxis: { dtick: 2, ticksuffix: "시" },
-    yaxis: { autorange: "reversed" }, // 월이 위
+    xaxis: { dtick: 3, ticksuffix: "시", tickfont: { size: 9 } },
+    yaxis: { autorange: "reversed", tickfont: { size: 10 } }, // 월이 위
   }, CHART_CONFIG);
 }
 
@@ -234,7 +232,29 @@ window.updateCharts = function () {
 };
 
 // ---------- 지도 ----------
-const INIT_VIEW = { center: [-73.95, 40.74], zoom: 10.7 };
+// 초기 시점: 데이터 전체 bbox fitBounds가 기본. 아래 상수는 bbox 계산 실패 폴백.
+const FALLBACK_VIEW = { center: [-73.95, 40.74], zoom: 10.7 };
+let INIT_VIEW = { ...FALLBACK_VIEW }; // fitBounds 후 실제 시점(getCenter/getZoom)으로 갱신
+
+// 승차+하차 좌표 전체의 bbox → [[minLon, minLat], [maxLon, maxLat]]
+function computeDataBounds() {
+  if (!TRIPS) return null;
+  const { plat, plon, dlat, dlon } = TRIPS;
+  if (!plat || !plat.length || !dlat || dlat.length !== plat.length) return null;
+  let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+  for (let i = 0; i < plat.length; i++) {
+    if (plat[i] < minLat) minLat = plat[i];
+    if (plat[i] > maxLat) maxLat = plat[i];
+    if (dlat[i] < minLat) minLat = dlat[i];
+    if (dlat[i] > maxLat) maxLat = dlat[i];
+    if (plon[i] < minLon) minLon = plon[i];
+    if (plon[i] > maxLon) maxLon = plon[i];
+    if (dlon[i] < minLon) minLon = dlon[i];
+    if (dlon[i] > maxLon) maxLon = dlon[i];
+  }
+  if (!Number.isFinite(minLat) || !Number.isFinite(minLon)) return null;
+  return [[minLon, minLat], [maxLon, maxLat]];
+}
 
 // 초기 시점 리셋 커스텀 컨트롤 (MapLibre IControl)
 class ResetViewControl {
@@ -264,14 +284,26 @@ function initMap() {
   map = new maplibregl.Map({
     container: "map",
     style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-    center: INIT_VIEW.center,
-    zoom: INIT_VIEW.zoom,
+    center: FALLBACK_VIEW.center,
+    zoom: FALLBACK_VIEW.zoom,
     attributionControl: true,
   });
   map.addControl(new maplibregl.NavigationControl(), "top-right");
   map.addControl(new ResetViewControl(), "top-right");
 
   map.on("load", () => {
+    // 데이터 전체 bbox로 초기 뷰 — animate:false는 동기(jumpTo)라 직후 캡처 가능.
+    // 리셋 버튼(⟲)도 이 실측 시점으로 복원.
+    try {
+      const bounds = computeDataBounds();
+      if (bounds) {
+        map.fitBounds(bounds, { padding: 24, animate: false });
+        INIT_VIEW = { center: map.getCenter(), zoom: map.getZoom() };
+      }
+    } catch (e) {
+      console.warn("bbox 초기 뷰 실패 — 폴백 시점 유지:", e);
+    }
+
     // 수변·공원 대비 강화 (스타일별 레이어 id가 다르므로 탐색해 적용)
     try {
       for (const lyr of map.getStyle().layers) {
@@ -442,13 +474,12 @@ function bindControls() {
     });
   });
 
-  document.querySelectorAll(".ctl-layer button[data-layer]").forEach((btn) => {
+  document.querySelectorAll(".layer-switch button[data-layer]").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (state.layer === btn.dataset.layer) return;
       state.layer = btn.dataset.layer;
-      document.querySelectorAll(".ctl-layer button[data-layer]").forEach((b) => b.classList.toggle("on", b === btn));
-      document.querySelector(".ctl-flow").hidden = state.layer !== "flow";
-      if (window.updateFlowLayer) window.updateFlowLayer();
+      document.querySelectorAll(".layer-switch button[data-layer]").forEach((b) => b.classList.toggle("on", b === btn));
+      if (window.updateFlowLayer) window.updateFlowLayer(); // 컨트롤 표시 전환 포함
     });
   });
 
@@ -481,7 +512,7 @@ async function init() {
   TRIPS = trips; META = meta; LANDMARKS = landmarks;
   fillKpis();
   bindControls();
-  setHexControlsDisabled(state.layer === "flow"); // 플로우 기본 — 헥스 컨트롤 초기 disabled
+  syncModeControls(); // 플로우 기본 — 모드에 맞는 컨트롤 그룹만 표시
 
   // 셀프테스트 훅: ?selftest 시 집계 요약을 title에 기록 (헤드리스 검증용)
   if (location.search.includes("selftest")) {

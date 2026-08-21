@@ -25,11 +25,11 @@
   <main class="map-col"><div id="map"></div></main>
 
   <aside class="panel">
+    <div class="layer-switch" role="tablist">
+      <button data-layer="flow" class="on">도로 플로우</button><button data-layer="hex">헥스빈</button>
+    </div>
+
     <section class="controls">
-      <div class="ctl-group ctl-layer">
-        <span class="ctl-label">레이어</span>
-        <button data-layer="hex">헥스빈</button><button data-layer="flow" class="on">도로 플로우</button>
-      </div>
       <div class="ctl-group ctl-flow">
         <span class="ctl-label">플로우</span>
         <button data-wp="wd" class="on">주중</button><button data-wp="we">주말</button>
@@ -37,18 +37,18 @@
         <button data-band="0">새벽 0–6</button><button data-band="1">오전 6–12</button><button data-band="2">오후 12–18</button><button data-band="3" class="on">저녁 18–24</button>
         <span class="ctl-note">플로우는 주중/주말 × 시간대 단위 집계</span>
       </div>
-      <div class="ctl-group ctl-days">
+      <div class="ctl-group ctl-days" hidden>
         <span class="ctl-label">요일</span>
         <button data-day="0" class="on">월</button><button data-day="1" class="on">화</button><button data-day="2" class="on">수</button><button data-day="3" class="on">목</button><button data-day="4" class="on">금</button><button data-day="5" class="on">토</button><button data-day="6" class="on">일</button>
         <button id="days-all" class="ctl-aux">전체 선택</button><button id="days-none" class="ctl-aux">해제</button>
       </div>
-      <div class="ctl-group ctl-hour">
+      <div class="ctl-group ctl-hour" hidden>
         <span class="ctl-label">시간</span>
         <button id="hour-all" class="ctl-toggle on">전체 시간</button>
         <input type="range" id="hour" min="0" max="23" value="18" disabled>
         <span id="hour-label"></span>
       </div>
-      <div class="ctl-group ctl-metric">
+      <div class="ctl-group ctl-metric" hidden>
         <span class="ctl-label">지표</span>
         <button data-metric="count" class="on">트립 밀도</button><button data-metric="speed">평균 속력</button>
       </div>
@@ -58,11 +58,12 @@
       <h2>시간대별 트립 수 <span class="chart-sub">(선택 요일 기준)</span></h2>
       <div id="chart-hour"></div>
     </div>
-  </aside>
-</section>
 
-<section class="charts">
-  <div class="chart-box"><h2>요일 × 시간 평균 속력</h2><div id="chart-heat"></div></div>
+    <div class="chart-box chart-box--heat">
+      <h2>요일 × 시간 평균 속력</h2>
+      <div id="chart-heat"></div>
+    </div>
+  </aside>
 </section>
 
 <section class="notes" id="insights">

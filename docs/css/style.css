@@ -1,8 +1,9 @@
 /* ==========================================================================
    NYC Taxi Traffic — dashboard layout
    톤: 포트폴리오(hollyriver.github.io)와 통일된 잉크+스틸블루 미니멀
-   구조: 슬림 헤더(제목+KPI 칩) → [좌: 정방형 지도 | 우: 컨트롤+시간대 차트]
-         → 전체 폭 히트맵 → 관찰/푸터
+   구조: 슬림 헤더(제목+KPI 칩)
+         → [좌: 정방형 지도 | 우: 캡슐 스위치+컨트롤+시간대 차트+히트맵]
+         → 관찰/푸터
    ========================================================================== */
 
 :root {
@@ -32,7 +33,7 @@ body {
 }
 
 /* 본문 블록 공통: 중앙 정렬 컬럼 */
-.hero, .dash, .charts, .notes, .foot {
+.hero, .dash, .notes, .foot {
   max-width: var(--maxw);
   margin-left: auto;
   margin-right: auto;
@@ -158,6 +159,57 @@ body {
 }
 
 /* --------------------------------------------------------------------------
+   Layer switch — 패널 최상단 캡슐형 세그먼트 컨트롤 (플로우 | 헥스빈)
+   -------------------------------------------------------------------------- */
+.layer-switch {
+  display: flex;
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.layer-switch button {
+  appearance: none;
+  flex: 1 1 0;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.layer-switch button + button { border-left: 1px solid var(--line); }
+
+.layer-switch button:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.layer-switch button.on {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.layer-switch button.on:hover { background: #2c4c80; }
+
+.layer-switch button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+  border-radius: var(--radius-pill);
+}
+
+/* --------------------------------------------------------------------------
    Controls — 패널 내부 카드
    -------------------------------------------------------------------------- */
 .controls {
@@ -168,6 +220,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  /* 플로우/헥스 세트 중 큰 쪽(헥스 3그룹, 실측 164.7px)으로 고정 —
+     모드 전환 시 아래 차트들이 밀리지 않게 (ref/verify-panel.mjs로 실측) */
+  min-height: 166px;
 }
 
 .ctl-group {
@@ -177,16 +232,8 @@ body {
   gap: 6px;
 }
 
+/* 모드별 표시 전환: 플로우 모드 → .ctl-flow만, 헥스 모드 → 요일/시간/지표만 */
 .ctl-group[hidden] { display: none; }
-
-/* 플로우 모드에서 무의미해지는 그룹(요일·시간·지표)의 disabled 시각 처리 */
-.ctl-group.disabled { opacity: 0.45; }
-
-.ctl-group.disabled button,
-.ctl-group.disabled input {
-  cursor: default;
-  pointer-events: none;
-}
 
 .ctl-label {
   min-width: 44px;
@@ -293,10 +340,8 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   Charts
+   Charts — 우측 패널 내부 (시간대별 트립 수 + 요일×시간 히트맵)
    -------------------------------------------------------------------------- */
-.charts { margin-top: 16px; }
-
 .chart-box {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -324,10 +369,10 @@ body {
   border-radius: 8px;
 }
 
-/* 전체 폭 히트맵: 24×7 셀이 정사각형에 가깝도록 —
-   정확한 높이는 renderHeatChart()가 플롯 폭 기준으로 재산정 (아래는 no-JS 폴백) */
+/* 패널 폭 compact 히트맵 — 정확한 높이는 renderHeatChart()가
+   컨테이너 폭 기준으로 재산정 (아래는 no-JS 폴백) */
 #chart-heat {
-  height: 340px;
+  height: 150px;
   background: var(--bg-soft);
   border-radius: 8px;
 }
@@ -407,7 +452,7 @@ body {
   }
   .ctl-group > .ctl-label { min-width: 0; }
   /* 라벨 아래 버튼들은 가로로 흐르게 */
-  .ctl-days, .ctl-metric, .ctl-layer, .ctl-flow, .ctl-hour {
+  .ctl-days, .ctl-metric, .ctl-flow, .ctl-hour {
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
