@@ -6,6 +6,12 @@ const state = { days: new Set([0, 1, 2, 3, 4, 5, 6]), hour: null, metric: "speed
 
 const DAY_RANGE = { wd: [0, 1, 2, 3, 4], we: [5, 6], all: [0, 1, 2, 3, 4, 5, 6] };
 
+// 플로우 시간대(밴드) → 해당 6시간 Set. 0→0–5, 1→6–11, 2→12–17, 3→18–23
+function bandHours(b) {
+  const base = b * 6; // 0→0,1→6,2→12,3→18
+  return new Set([base, base + 1, base + 2, base + 3, base + 4, base + 5]);
+}
+
 // 플로우 요일 범위 → 헥스 요일 선택·시간(전체)으로 동기화. 히스토그램·KPI가 같은 선택을 따름.
 function applyFlowDayRange() {
   state.days = new Set(DAY_RANGE[state.flowWp] || DAY_RANGE.all);
@@ -76,9 +82,10 @@ function aggregate() {
 }
 
 // ---------- 색상 표현식 ----------
-// 속력: 도로망 최단경로 거리 기준 값에 맞춘 고정 스톱
+// 속력: 도로망 최단경로 거리 기준 값에 맞춘 고정 스톱.
+// 저속(정체)=검붉음으로 끝맺고 저속 구간에 스톱을 촘촘히 배치해 색 해상도↑ (R3)
 const FILL_SPEED = ["interpolate", ["linear"], ["get", "speed"],
-  8, "#c73030", 15, "#e08c3a", 22, "#c9c94a", 32, "#3f9e63"];
+  6, "#2a0a0a", 9, "#7a1717", 12, "#c73030", 16, "#e08c3a", 22, "#c9c94a", 30, "#3f9e63"];
 
 // 밀도: 고정 스톱이면 희소 선택(특정 요일+시간)에서 최저색으로 뭉개짐 →
 // refresh()마다 셀 n값 분위수(p50/p85/p98)로 스톱을 동적 구성
@@ -114,43 +121,41 @@ function currentFillColor() {
 const flowCache = {}; // wp+band → GeoJSON (lazy fetch)
 let flowReq = 0;      // 최신 요청만 반영하기 위한 시퀀스
 
-// 신호등 스케일: 원활(저통행)=초록 → 중간=노랑 → 정체(고통행)=주황→빨강 + 굵기·투명도 그라데이션.
-// 고정 스톱이면 "전체×전체"(n 수백)에서 화면이 포화 → 슬라이스별 n 분위수(p50/p85/p99)로
-// 스톱을 동적 구성 (헥스빈 buildCountColor와 같은 패턴). 아래 상수는 초기(빈 데이터) 기본값.
-const FLOW_PALETTE = ["#3f9e63", "#c9c94a", "#e08c3a", "#c73030"];
-const FLOW_WIDTHS = [0.5, 1.6, 3, 5];
+// 신호등 스케일: 원활(저통행)=초록 → 중간=노랑/주황 → 정체(고통행)=빨강→검붉음 + 굵기·투명도 그라데이션.
+// 고정 스톱이면 "전체×전체"(n 수백)에서 화면이 포화 → 슬라이스별 n 분위수로 스톱을 동적 구성
+// (헥스빈 buildCountColor와 같은 패턴). 5색 팔레트로 정체 구간 색 해상도를 높이고 상위 분위수
+// (p55/p78/p92/p99)를 촘촘히 배치 (R3). 아래 상수는 초기(빈 데이터) 기본값.
+const FLOW_PALETTE = ["#3f9e63", "#c9c94a", "#e08c3a", "#c73030", "#2a0a0a"]; // 저통행→정체(검붉음)
+const FLOW_WIDTHS = [0.5, 1.4, 2.4, 3.6, 5.5];
 const FLOW_LINE_COLOR = ["interpolate", ["linear"], ["get", "n"],
-  3, FLOW_PALETTE[0], 20, FLOW_PALETTE[1], 60, FLOW_PALETTE[2], 150, FLOW_PALETTE[3]];
+  3, FLOW_PALETTE[0], 20, FLOW_PALETTE[1], 60, FLOW_PALETTE[2], 120, FLOW_PALETTE[3], 180, FLOW_PALETTE[4]];
 const FLOW_LINE_WIDTH = ["interpolate", ["linear"], ["get", "n"],
-  3, FLOW_WIDTHS[0], 20, FLOW_WIDTHS[1], 60, FLOW_WIDTHS[2], 150, FLOW_WIDTHS[3]];
+  3, FLOW_WIDTHS[0], 20, FLOW_WIDTHS[1], 60, FLOW_WIDTHS[2], 120, FLOW_WIDTHS[3], 180, FLOW_WIDTHS[4]];
 const FLOW_LINE_OPACITY = ["interpolate", ["linear"], ["get", "n"],
-  3, 0.45, 30, 0.75, 100, 0.95];
+  3, 0.5, 60, 0.8, 180, 0.98];
 
 function buildFlowPaint(fc) {
   const ns = fc.features.map((f) => f.properties.n).sort((a, b) => a - b);
   const lo = ns.length ? ns[0] : 3;
   const hi = ns.length ? ns[ns.length - 1] : 150;
-  if (ns.length >= 4 && hi > lo) {
-    const stops = [lo, quantileSorted(ns, 0.5), quantileSorted(ns, 0.85), quantileSorted(ns, 0.99)];
-    if (stops.every((s, i) => i === 0 || s > stops[i - 1])) {
-      return {
-        color: ["interpolate", ["linear"], ["get", "n"],
-          stops[0], FLOW_PALETTE[0], stops[1], FLOW_PALETTE[1],
-          stops[2], FLOW_PALETTE[2], stops[3], FLOW_PALETTE[3]],
-        width: ["interpolate", ["linear"], ["get", "n"],
-          stops[0], FLOW_WIDTHS[0], stops[1], FLOW_WIDTHS[1],
-          stops[2], FLOW_WIDTHS[2], stops[3], FLOW_WIDTHS[3]],
-        opacity: ["interpolate", ["linear"], ["get", "n"],
-          stops[0], 0.45, stops[1], 0.75, stops[3], 0.95],
-      };
-    }
+  if (ns.length >= 5 && hi > lo) {
+    // 고통행 구간을 세밀하게: 상위 분위수를 촘촘히 (p55/p78/p92/p99)
+    const stops = [lo, quantileSorted(ns, 0.55), quantileSorted(ns, 0.78), quantileSorted(ns, 0.92), quantileSorted(ns, 0.99)];
+    for (let i = 1; i < stops.length; i++) if (stops[i] <= stops[i - 1]) stops[i] = stops[i - 1] + 1e-6;
+    return {
+      color: ["interpolate", ["linear"], ["get", "n"],
+        stops[0], FLOW_PALETTE[0], stops[1], FLOW_PALETTE[1], stops[2], FLOW_PALETTE[2], stops[3], FLOW_PALETTE[3], stops[4], FLOW_PALETTE[4]],
+      width: ["interpolate", ["linear"], ["get", "n"],
+        stops[0], FLOW_WIDTHS[0], stops[1], FLOW_WIDTHS[1], stops[2], FLOW_WIDTHS[2], stops[3], FLOW_WIDTHS[3], stops[4], FLOW_WIDTHS[4]],
+      opacity: ["interpolate", ["linear"], ["get", "n"], stops[0], 0.5, stops[2], 0.8, stops[4], 0.98],
+    };
   }
-  // 퇴화 케이스(피처 적거나 스톱 겹침): [lo, hi] 2스톱 폴백으로 최소 대비 보장
+  // 퇴화 케이스(피처 적음): [lo, hi] 2스톱 폴백으로 최소 대비 보장
   const top = Math.max(hi, lo + 1);
   return {
-    color: ["interpolate", ["linear"], ["get", "n"], lo, FLOW_PALETTE[0], top, FLOW_PALETTE[3]],
-    width: ["interpolate", ["linear"], ["get", "n"], lo, FLOW_WIDTHS[0], top, FLOW_WIDTHS[3]],
-    opacity: ["interpolate", ["linear"], ["get", "n"], lo, 0.45, top, 0.95],
+    color: ["interpolate", ["linear"], ["get", "n"], lo, FLOW_PALETTE[0], top, FLOW_PALETTE[4]],
+    width: ["interpolate", ["linear"], ["get", "n"], lo, FLOW_WIDTHS[0], top, FLOW_WIDTHS[4]],
+    opacity: ["interpolate", ["linear"], ["get", "n"], lo, 0.5, top, 0.98],
   };
 }
 
@@ -210,17 +215,27 @@ window.updateFlowLayer = async function () {
 };
 
 // ---------- KPI ----------
-// KPI: 현재 선택(state.days + state.hour) 기준 재계산. 최저속 시간대는 선택 요일의
-// 전체 시간에서 산출(단일 시간 선택과 무관). 기본(전체 요일·전체 시간)은 meta와 동일.
+// KPI: 현재 선택 기준 재계산. 플로우 모드는 요일범위 + 시간대(밴드), 헥스 모드는
+// state.days + state.hour. 최저속 시간대는 헥스=선택 요일 전 시간, 플로우=선택 밴드
+// 시간에서 산출(전체 밴드는 전 시간). 기본(전체 요일·전체 시간)은 meta와 동일.
 function updateKpis() {
   if (!TRIPS) return;
   const { dow, hr, v, km } = TRIPS;
+  const flow = state.layer === "flow";
+  // 통계 대상 시간 필터
+  const statHours = flow
+    ? (state.flowBand === "all" ? null : bandHours(state.flowBand))
+    : (state.hour === null ? null : new Set([state.hour]));
+  // 최저속 시간대 산출 범위 (헥스는 단일 시간 선택과 무관하게 선택 요일 전 시간)
+  const slowHours = flow
+    ? (state.flowBand === "all" ? null : bandHours(state.flowBand))
+    : null;
   let n = 0, sv = 0, sk = 0;
   const hSum = new Array(24).fill(0), hCnt = new Array(24).fill(0);
   for (let i = 0; i < dow.length; i++) {
     if (!state.days.has(dow[i])) continue;
-    hSum[hr[i]] += v[i]; hCnt[hr[i]]++;
-    if (state.hour !== null && hr[i] !== state.hour) continue;
+    if (slowHours === null || slowHours.has(hr[i])) { hSum[hr[i]] += v[i]; hCnt[hr[i]]++; }
+    if (statHours !== null && !statHours.has(hr[i])) continue;
     n++; sv += v[i]; sk += km[i];
   }
   const fmt = (x) => x.toLocaleString("en-US");
@@ -264,7 +279,7 @@ function renderHeatChart() {
     x: [...Array(24).keys()],
     y: DAY_LABELS,
     customdata: cnt,
-    colorscale: [[0, "#c73030"], [0.4, "#e08c3a"], [0.7, "#c9c94a"], [1, "#3f9e63"]],
+    colorscale: [[0, "#2a0a0a"], [0.12, "#7a1717"], [0.28, "#c73030"], [0.52, "#e08c3a"], [0.74, "#c9c94a"], [1, "#3f9e63"]],
     colorbar: { title: { text: "km/h", side: "top", font: { size: 9 } }, thickness: 8, outlinewidth: 0, tickfont: { size: 9 } },
     // x축 ticksuffix "시"가 hover의 %{x} 포맷에도 적용됨 — "시"를 덧붙이면 "18시시"로 중복
     hovertemplate: "%{y}요일 %{x} · 평균 %{z} km/h · 표본 %{customdata}건<extra></extra>",
@@ -286,7 +301,11 @@ window.updateCharts = function () {
   for (let i = 0; i < dow.length; i++) {
     if (state.days.has(dow[i])) counts[hr[i]]++;
   }
-  const colors = counts.map((_, h) => (state.hour === h ? "#345995" : "#7f9cc9"));
+  const flow = state.layer === "flow";
+  const highlight = flow
+    ? (state.flowBand === "all" ? null : bandHours(state.flowBand))
+    : (state.hour === null ? null : new Set([state.hour]));
+  const colors = counts.map((_, h) => (highlight && highlight.has(h) ? "#345995" : "#7f9cc9"));
 
   Plotly.react("chart-hour", [{
     type: "bar",
@@ -566,6 +585,8 @@ function bindControls() {
       document.querySelectorAll(".layer-switch button[data-layer]").forEach((b) => b.classList.toggle("on", b === btn));
       if (state.layer === "flow") applyFlowDayRange(); // 헥스→플로우 전환 시 요일을 플로우 범위로 재동기화
       if (window.updateFlowLayer) window.updateFlowLayer(); // 컨트롤 표시 전환 포함
+      updateKpis();          // 모드별 KPI 로직 반영 (R1)
+      window.updateCharts(); // 모드별 막대 강조 반영
     });
   });
 
@@ -587,6 +608,8 @@ function bindControls() {
       state.flowBand = val;
       document.querySelectorAll(".ctl-flow button[data-band]").forEach((b) => b.classList.toggle("on", b === btn));
       window.updateFlowLayer();
+      updateKpis();          // 밴드 선택이 KPI를 좌우 (R1)
+      window.updateCharts(); // 히스토그램 밴드 시간대 막대 강조
     });
   });
 }
