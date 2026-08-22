@@ -121,42 +121,34 @@ function currentFillColor() {
 const flowCache = {}; // wp+band → GeoJSON (lazy fetch)
 let flowReq = 0;      // 최신 요청만 반영하기 위한 시퀀스
 
-// 신호등 스케일: 원활(저통행)=초록 → 중간=노랑/주황 → 정체(고통행)=빨강→검붉음 + 굵기·투명도 그라데이션.
-// 고정 스톱이면 "전체×전체"(n 수백)에서 화면이 포화 → 슬라이스별 n 분위수로 스톱을 동적 구성
-// (헥스빈 buildCountColor와 같은 패턴). 5색 팔레트로 정체 구간 색 해상도를 높이고 상위 분위수
-// (p55/p78/p92/p99)를 촘촘히 배치 (R3). 아래 상수는 초기(빈 데이터) 기본값.
-const FLOW_PALETTE = ["#3f9e63", "#c9c94a", "#e08c3a", "#c73030", "#2a0a0a"]; // 저통행→정체(검붉음)
+// 색/두께 분리 (9차): 색 = 세그먼트 평균 속력(s, 정체=검붉음), 두께 = 통행량(n).
+// 색은 속력 기준 고정 램프 — 헥스 FILL_SPEED와 동일 의미론(저속=검붉음 → 고속=초록).
+// 넓은 간선은 통행이 많아도(굵어도) 안 막힐 수 있으므로 색을 n에서 분리해 정체를 정확히 표현.
+const FLOW_SPEED_COLOR = ["interpolate", ["linear"], ["get", "s"],
+  6, "#2a0a0a", 9, "#7a1717", 12, "#c73030", 16, "#e08c3a", 22, "#c9c94a", 30, "#3f9e63"];
+// 두께·투명도는 통행량 n 기준. 고정 스톱이면 "전체×전체"(n 수백)에서 포화 →
+// 슬라이스별 n 분위수(p55/p78/p92/p99)로 스톱을 동적 구성 (헥스빈 buildCountColor와 같은 패턴).
 const FLOW_WIDTHS = [0.5, 1.4, 2.4, 3.6, 5.5];
-const FLOW_LINE_COLOR = ["interpolate", ["linear"], ["get", "n"],
-  3, FLOW_PALETTE[0], 20, FLOW_PALETTE[1], 60, FLOW_PALETTE[2], 120, FLOW_PALETTE[3], 180, FLOW_PALETTE[4]];
-const FLOW_LINE_WIDTH = ["interpolate", ["linear"], ["get", "n"],
-  3, FLOW_WIDTHS[0], 20, FLOW_WIDTHS[1], 60, FLOW_WIDTHS[2], 120, FLOW_WIDTHS[3], 180, FLOW_WIDTHS[4]];
-const FLOW_LINE_OPACITY = ["interpolate", ["linear"], ["get", "n"],
-  3, 0.5, 60, 0.8, 180, 0.98];
 
 function buildFlowPaint(fc) {
   const ns = fc.features.map((f) => f.properties.n).sort((a, b) => a - b);
   const lo = ns.length ? ns[0] : 3;
   const hi = ns.length ? ns[ns.length - 1] : 150;
+  let width, opacity;
   if (ns.length >= 5 && hi > lo) {
     // 고통행 구간을 세밀하게: 상위 분위수를 촘촘히 (p55/p78/p92/p99)
     const stops = [lo, quantileSorted(ns, 0.55), quantileSorted(ns, 0.78), quantileSorted(ns, 0.92), quantileSorted(ns, 0.99)];
     for (let i = 1; i < stops.length; i++) if (stops[i] <= stops[i - 1]) stops[i] = stops[i - 1] + 1e-6;
-    return {
-      color: ["interpolate", ["linear"], ["get", "n"],
-        stops[0], FLOW_PALETTE[0], stops[1], FLOW_PALETTE[1], stops[2], FLOW_PALETTE[2], stops[3], FLOW_PALETTE[3], stops[4], FLOW_PALETTE[4]],
-      width: ["interpolate", ["linear"], ["get", "n"],
-        stops[0], FLOW_WIDTHS[0], stops[1], FLOW_WIDTHS[1], stops[2], FLOW_WIDTHS[2], stops[3], FLOW_WIDTHS[3], stops[4], FLOW_WIDTHS[4]],
-      opacity: ["interpolate", ["linear"], ["get", "n"], stops[0], 0.5, stops[2], 0.8, stops[4], 0.98],
-    };
+    width = ["interpolate", ["linear"], ["get", "n"],
+      stops[0], FLOW_WIDTHS[0], stops[1], FLOW_WIDTHS[1], stops[2], FLOW_WIDTHS[2], stops[3], FLOW_WIDTHS[3], stops[4], FLOW_WIDTHS[4]];
+    opacity = ["interpolate", ["linear"], ["get", "n"], stops[0], 0.5, stops[2], 0.8, stops[4], 0.98];
+  } else {
+    // 퇴화 케이스(피처 적음): [lo, hi] 2스톱 폴백으로 최소 대비 보장
+    const top = Math.max(hi, lo + 1);
+    width = ["interpolate", ["linear"], ["get", "n"], lo, FLOW_WIDTHS[0], top, FLOW_WIDTHS[4]];
+    opacity = ["interpolate", ["linear"], ["get", "n"], lo, 0.5, top, 0.98];
   }
-  // 퇴화 케이스(피처 적음): [lo, hi] 2스톱 폴백으로 최소 대비 보장
-  const top = Math.max(hi, lo + 1);
-  return {
-    color: ["interpolate", ["linear"], ["get", "n"], lo, FLOW_PALETTE[0], top, FLOW_PALETTE[4]],
-    width: ["interpolate", ["linear"], ["get", "n"], lo, FLOW_WIDTHS[0], top, FLOW_WIDTHS[4]],
-    opacity: ["interpolate", ["linear"], ["get", "n"], lo, 0.5, top, 0.98],
-  };
+  return { color: FLOW_SPEED_COLOR, width, opacity };
 }
 
 // 모드별 컨트롤 표시 전환: 플로우 → .ctl-flow만, 헥스 → 요일/시간/지표만
@@ -433,10 +425,11 @@ function initMap() {
       type: "line",
       source: "flow",
       layout: { "line-cap": "round", "line-join": "round", "visibility": "none" },
+      // 색은 s 기준 고정 램프(초기부터), 두께·투명도는 updateFlowLayer가 슬라이스별로 설정.
       paint: {
-        "line-color": FLOW_LINE_COLOR,
-        "line-width": FLOW_LINE_WIDTH,
-        "line-opacity": FLOW_LINE_OPACITY,
+        "line-color": FLOW_SPEED_COLOR,
+        "line-width": ["interpolate", ["linear"], ["get", "n"], 3, FLOW_WIDTHS[0], 180, FLOW_WIDTHS[4]],
+        "line-opacity": ["interpolate", ["linear"], ["get", "n"], 3, 0.5, 180, 0.98],
       },
     });
 
@@ -482,7 +475,8 @@ function initMap() {
     });
     map.on("mousemove", "flow-lines", (e) => {
       map.getCanvas().style.cursor = "pointer";
-      popup.setLngLat(e.lngLat).setHTML(`통행 ${e.features[0].properties.n}회`).addTo(map);
+      const p = e.features[0].properties;
+      popup.setLngLat(e.lngLat).setHTML(`통행 ${p.n}회 · 평균 ${p.s} km/h`).addTo(map);
     });
     map.on("mouseleave", "flow-lines", () => {
       map.getCanvas().style.cursor = "";
