@@ -216,14 +216,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-/* 플로우 모드(2줄)는 헥스 모드(3줄)보다 내용이 적으므로 패딩·gap을 키워
-   두 모드의 카드 높이를 몇 px 이내로 근접 — 모드 전환 시 차트가 튀지 않게
-   (고정 min-height 대신 내용 맞춤, ref/verify6.mjs로 실측) */
-.controls.mode-flow {
-  padding: 22px 16px;
-  gap: 20px;
+  /* 두 모드(헥스 3줄 / 플로우 2줄)의 카드 높이를 동일 고정 — 모드 전환 시
+     아래 차트(chart-hour·chart-heat)의 y좌표가 0px 이동하도록 헥스 자연 높이로 맞춤
+     (ref/verify7.mjs로 CDP 실측: 헥스 3줄 자연 높이 ≈132px). 플로우(2줄)는 이 min-height까지 채워짐 */
+  min-height: 133px;
 }
 
 .ctl-group {
@@ -469,7 +465,9 @@ body {
 
   .kpi { padding: 4px 10px; gap: 6px; }
 
-  .controls, .controls.mode-flow { padding: 12px 14px; gap: 10px; }
+  /* 480px 이하에서는 각 그룹이 세로로 접혀 두 모드 높이차가 커지므로
+     min-height 고정을 해제(auto)해 불필요한 여백을 막음 */
+  .controls { padding: 12px 14px; gap: 10px; min-height: auto; }
   .ctl-group {
     flex-direction: column;
     align-items: flex-start;

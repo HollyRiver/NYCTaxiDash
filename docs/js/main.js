@@ -2,7 +2,26 @@
 "use strict";
 
 // ---------- 상태 ----------
-const state = { days: new Set([0, 1, 2, 3, 4, 5, 6]), hour: null, metric: "count", layer: "flow", flowWp: "wd", flowBand: 3 };
+const state = { days: new Set([0, 1, 2, 3, 4, 5, 6]), hour: null, metric: "speed", layer: "flow", flowWp: "all", flowBand: "all" };
+
+const DAY_RANGE = { wd: [0, 1, 2, 3, 4], we: [5, 6], all: [0, 1, 2, 3, 4, 5, 6] };
+
+// 플로우 요일 범위 → 헥스 요일 선택·시간(전체)으로 동기화. 히스토그램·KPI가 같은 선택을 따름.
+function applyFlowDayRange() {
+  state.days = new Set(DAY_RANGE[state.flowWp] || DAY_RANGE.all);
+  state.hour = null;
+  document.querySelectorAll(".ctl-days button[data-day]").forEach((b) =>
+    b.classList.toggle("on", state.days.has(+b.dataset.day)));
+  const daysAll = document.getElementById("days-all");
+  if (daysAll) daysAll.classList.toggle("on", state.days.size === 7);
+  const hourAll = document.getElementById("hour-all");
+  const hourInput = document.getElementById("hour");
+  const hourLabel = document.getElementById("hour-label");
+  if (hourAll) hourAll.classList.add("on");
+  if (hourInput) hourInput.disabled = true;
+  if (hourLabel) hourLabel.textContent = "";
+  refresh();
+}
 
 let TRIPS = null;
 let META = null;
@@ -59,7 +78,7 @@ function aggregate() {
 // ---------- 색상 표현식 ----------
 // 속력: 도로망 최단경로 거리 기준 값에 맞춘 고정 스톱
 const FILL_SPEED = ["interpolate", ["linear"], ["get", "speed"],
-  7, "#a63232", 15, "#d99a4e", 22, "#7f9cc9", 34, "#2e7d52"];
+  8, "#c73030", 15, "#e08c3a", 22, "#c9c94a", 32, "#3f9e63"];
 
 // 밀도: 고정 스톱이면 희소 선택(특정 요일+시간)에서 최저색으로 뭉개짐 →
 // refresh()마다 셀 n값 분위수(p50/p85/p98)로 스톱을 동적 구성
@@ -191,12 +210,28 @@ window.updateFlowLayer = async function () {
 };
 
 // ---------- KPI ----------
-function fillKpis() {
+// KPI: 현재 선택(state.days + state.hour) 기준 재계산. 최저속 시간대는 선택 요일의
+// 전체 시간에서 산출(단일 시간 선택과 무관). 기본(전체 요일·전체 시간)은 meta와 동일.
+function updateKpis() {
+  if (!TRIPS) return;
+  const { dow, hr, v, km } = TRIPS;
+  let n = 0, sv = 0, sk = 0;
+  const hSum = new Array(24).fill(0), hCnt = new Array(24).fill(0);
+  for (let i = 0; i < dow.length; i++) {
+    if (!state.days.has(dow[i])) continue;
+    hSum[hr[i]] += v[i]; hCnt[hr[i]]++;
+    if (state.hour !== null && hr[i] !== state.hour) continue;
+    n++; sv += v[i]; sk += km[i];
+  }
   const fmt = (x) => x.toLocaleString("en-US");
-  document.getElementById("kpi-total").textContent = fmt(META.n);
-  document.getElementById("kpi-speed").textContent = META.avg_speed + " km/h";
-  document.getElementById("kpi-slowest").textContent = META.slowest_hour + "시";
-  document.getElementById("kpi-dist").textContent = META.avg_dist + " km";
+  document.getElementById("kpi-total").textContent = n ? fmt(n) : "—";
+  document.getElementById("kpi-speed").textContent = n ? (sv / n).toFixed(1) + " km/h" : "—";
+  document.getElementById("kpi-dist").textContent = n ? (sk / n).toFixed(2) + " km" : "—";
+  let slow = -1, slowV = Infinity;
+  for (let h = 0; h < 24; h++) {
+    if (hCnt[h] && hSum[h] / hCnt[h] < slowV) { slowV = hSum[h] / hCnt[h]; slow = h; }
+  }
+  document.getElementById("kpi-slowest").textContent = slow >= 0 ? slow + "시" : "—";
 }
 
 // ---------- 보조 차트 (Plotly) ----------
@@ -229,7 +264,7 @@ function renderHeatChart() {
     x: [...Array(24).keys()],
     y: DAY_LABELS,
     customdata: cnt,
-    colorscale: [[0, "#c73030"], [0.4, "#d99a4e"], [0.75, "#7f9cc9"], [1, "#2e5f95"]],
+    colorscale: [[0, "#c73030"], [0.4, "#e08c3a"], [0.7, "#c9c94a"], [1, "#3f9e63"]],
     colorbar: { title: { text: "km/h", side: "top", font: { size: 9 } }, thickness: 8, outlinewidth: 0, tickfont: { size: 9 } },
     // x축 ticksuffix "시"가 hover의 %{x} 포맷에도 적용됨 — "시"를 덧붙이면 "18시시"로 중복
     hovertemplate: "%{y}요일 %{x} · 평균 %{z} km/h · 표본 %{customdata}건<extra></extra>",
@@ -451,6 +486,7 @@ function refresh() {
     }
   }
   if (window.updateCharts) window.updateCharts();
+  updateKpis();
 }
 window.__refresh = refresh;
 
@@ -528,6 +564,7 @@ function bindControls() {
       if (state.layer === btn.dataset.layer) return;
       state.layer = btn.dataset.layer;
       document.querySelectorAll(".layer-switch button[data-layer]").forEach((b) => b.classList.toggle("on", b === btn));
+      if (state.layer === "flow") applyFlowDayRange(); // 헥스→플로우 전환 시 요일을 플로우 범위로 재동기화
       if (window.updateFlowLayer) window.updateFlowLayer(); // 컨트롤 표시 전환 포함
     });
   });
@@ -539,6 +576,7 @@ function bindControls() {
       if (state.flowWp === btn.dataset.wp) return;
       state.flowWp = btn.dataset.wp;
       document.querySelectorAll(".ctl-flow button[data-wp]").forEach((b) => b.classList.toggle("on", b === btn));
+      applyFlowDayRange();
       window.updateFlowLayer();
     });
   });
@@ -561,7 +599,7 @@ async function init() {
     fetch("data/landmarks.json").then((r) => r.json()),
   ]);
   TRIPS = trips; META = meta; LANDMARKS = landmarks;
-  fillKpis();
+  updateKpis();
   bindControls();
   syncModeControls(); // 플로우 기본 — 모드에 맞는 컨트롤 그룹만 표시
 
