@@ -41,26 +41,6 @@
 3. **세그먼트 속도는 근사치** — 플로우 색으로 쓰는 세그먼트 평균 속력은 그 도로를 지난 트립들의 전체 평균 속력(트립 전체 구간 기준)이며, 그 구간을 실제로 통과한 속도가 아님.
 4. **2016년 표본** — 현재 교통 상황과 다를 수 있음.
 
-## 빌드 방법
-
-빌드 산출물(`docs/data/`)이 커밋되어 있어 재빌드 없이 바로 서빙 가능.
-
-```bash
-# 헥스빈용 트립 데이터 (trips.json, meta.json)
-pip install pandas numpy
-python scripts/build_data.py
-
-# 도로 플로우 8슬라이스 (flow_*.geojson) — OSM 다운로드로 수 분 소요
-pip install osmnx scikit-learn
-python scripts/build_flows.py
-
-# 테스트
-python -m pytest tests/
-
-# 로컬 서빙
-python -m http.server 8000 --directory docs
-```
-
 ## 제작 노트
 
 Claude Code와의 페어링(바이브 코딩)으로 설계부터 배포까지 진행.
