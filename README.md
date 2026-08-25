@@ -1,4 +1,4 @@
-# NYC Taxi Traffic — 택시 이용량 기반 도로 플로우 시각화 분석 [Link](https://hollyriver.github.io/NYCTaxiDash/)
+# 뉴욕 택시 이용기록 기반 도로 플로우 시각화 대시보드 [Link](https://hollyriver.github.io/NYCTaxiDash/)
 
 &nbsp;[Kaggle NYC Taxi Trip Duration](https://www.kaggle.com/c/nyc-taxi-trip-duration) 데이터 기반으로 제작된 인터랙티브 대시보드입니다. 데이터베이스나 서버와의 연결 없이 정적으로 동작합니다. 교통 혼잡 지역 및 혼잡 시간을 두 개의 지도(Map) 레이어를 통해 시각화합니다.
 
