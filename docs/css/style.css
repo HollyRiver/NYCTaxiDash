@@ -99,7 +99,7 @@ body {
 .kpis {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 5px;
   flex-shrink: 0; /* 지도(flex:1)가 세로를 채워도 KPI 스트립은 압축되지 않게 */
 }
 
@@ -108,8 +108,10 @@ body {
   align-items: baseline;
   justify-content: center;
   flex: 1 1 0;
-  gap: 8px;
-  padding: 5px 12px;
+  /* 칩 4개가 한 줄에 들어가는 폭대를 최대한 넓히려고 압축한 값 —
+     여백/자간을 줄일수록 2x2로 접히는 미디어쿼리 임계가 내려감 */
+  gap: 6px;
+  padding: 5px 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   background: var(--bg-soft);
@@ -117,7 +119,7 @@ body {
 }
 
 .kpi-value {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 800;
   letter-spacing: -0.01em;
   color: var(--accent);
@@ -126,22 +128,28 @@ body {
 }
 
 .kpi-label {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--muted);
   letter-spacing: 0.01em;
 }
 
 .kpi-label i {
   font-style: normal;
-  font-size: 0.64rem;
+  font-size: 0.62rem;
   color: #999;
-  margin-left: 3px;
+  margin-left: 2px;
 }
 
 /* 칩 4개가 한 줄에 안 들어가는 폭대에서는 3+1로 어긋나게 접히므로 2x2로 고정.
-   (한 줄 수납 여부는 좌측 컬럼 폭 = --dash-w에 달렸고, --dash-w는 뷰포트
-    '세로'에서 파생되므로 max-height가 주 조건, max-width는 창이 좁은 경우 보완) */
-@media (max-height: 715px), (max-width: 1240px) {
+   임계값 역산 (ref/probe-kpi.mjs 실측): 칩 4개 필요폭 615px,
+   좌측 컬럼 폭 = 0.62 * (--dash-w - 16) 이므로 --dash-w >= 1008px가 필요.
+   --dash-w = min(100%, --maxw, --fit-h * --dash-ratio) 이므로
+     세로 구속: --fit-h >= 1008/1.85 = 545  ->  100dvh >= 619px
+     가로 구속: 100vw - 40 >= 1008          ->  100vw  >= 1048px
+   KPI 라벨 길이나 칩 여백을 바꾸면 필요폭이 달라지므로 이 두 값도 다시 역산할 것.
+   2x2로 접히면 스트립이 32 -> 69px가 되고 그만큼 지도가 줄어든다 — 한 줄 유지가
+   지도를 키우는 쪽이라 임계를 여유 없이 실측 최소값에 붙여 둠 */
+@media (max-height: 618px), (max-width: 1047px) {
   .kpis {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
