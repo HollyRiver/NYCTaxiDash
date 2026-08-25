@@ -246,15 +246,22 @@ const CHART_FONT = '"Pretendard", -apple-system, "Segoe UI", "Noto Sans KR", "Ma
 const CHART_CONFIG = { displayModeBar: false, responsive: true };
 const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
 
+// 컨테이너 폭 기준 히트맵 높이 산정 — 최초 렌더와 리사이즈 핸들러가 공유.
+// 우측 패널 폭(~420px) 기준 compact: 셀 정방 비율을 따르되 최소 가독선 120px 확보
+// (좌우 여백 l26+r4 + 세로 컬러바(thickness 8 + 틱) ~36px ≈ 66, 상하 여백 t8+b24 = 32)
+function sizeHeatBox() {
+  const el = document.getElementById("chart-heat");
+  if (!el) return null;
+  const w = el.clientWidth || 420;
+  el.style.height = Math.max(120, Math.round((w - 66) * 7 / 24) + 32) + "px";
+  return el;
+}
+
 // 요일×시간 평균 속력 히트맵 — 필터와 무관한 전역 패턴 (1회만 렌더)
 function renderHeatChart() {
   if (!window.Plotly) return;
 
-  // 우측 패널 폭(~420px) 기준 compact: 셀 정방 비율을 따르되 최소 가독선 150px 확보
-  // (좌우 여백 l26+r4 + 세로 컬러바(thickness 8 + 틱) ~36px ≈ 66, 상하 여백 t8+b24 = 32)
-  const el = document.getElementById("chart-heat");
-  const w = el.clientWidth || 420;
-  el.style.height = Math.max(150, Math.round((w - 66) * 7 / 24) + 32) + "px";
+  sizeHeatBox();
 
   const { dow, hr, v } = TRIPS;
   const sum = Array.from({ length: 7 }, () => new Array(24).fill(0));
@@ -316,6 +323,21 @@ window.updateCharts = function () {
     bargap: 0.25,
   }, CHART_CONFIG);
 };
+
+// 뷰포트 contain-fit 레이아웃에서는 창 크기가 곧 차트 크기 — 시간대 차트는 잔여
+// 세로를, 히트맵은 폭에서 역산한 세로를 따라가야 하므로 리사이즈에서 명시적 재계산.
+// (Plotly의 responsive:true는 컨테이너 세로 변화를 스스로 따라가지 않음)
+let chartResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(chartResizeTimer);
+  chartResizeTimer = setTimeout(() => {
+    if (!window.Plotly) return;
+    const heat = sizeHeatBox();
+    for (const el of [document.getElementById("chart-hour"), heat]) {
+      if (el && el.data) Plotly.Plots.resize(el); // el.data — 렌더 완료된 그래프 div만
+    }
+  }, 150);
+});
 
 // ---------- 지도 ----------
 // 초기 시점: 데이터 전체 bbox fitBounds가 기본. 아래 상수는 bbox 계산 실패 폴백.
