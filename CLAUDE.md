@@ -20,5 +20,5 @@ NYC 택시 트래픽 인터랙티브 대시보드. 정적 사이트(GitHub Pages
 - 화면은 한 화면 고정(contain-fit) — `.dash`가 `--dash-ratio`/`--dash-maxh`/`--chrome`으로 뷰포트에 맞춰지고 남는 세로·가로는 여백. 높이는 `height`가 아니라 `min-height`로 줄 것(확정 높이는 짧은 뷰포트에서 콘텐츠가 푸터를 덮음). 푸터 등 대시보드 밖 세로 요소를 바꾸면 `--chrome`도 함께 조정. 뷰포트 세로 632px 미만에서만 스크롤 발생
 - 해설 텍스트(관찰·데이터 정제 기준·한계)는 화면에 두지 않음 — README.md가 정본, 푸터 링크로만 연결
 - 속력·거리는 OSM 도로망 최단경로 길이 기준 (미라우팅 107건만 직선거리) — 관련 수치 수정 시 README 일관성 유지
-- 통계적 정직: 표본 미달 셀 반투명, 이상치 제거 기준은 build_data.py 상수로 문서화
+- 통계적 정직: 표본 수는 헥스 밀도 지표·hover 팝업이 담당 (표본 미달 셀 반투명 처리는 색 가시성을 해쳐 폐지 — 재도입 금지), 헥스 범례 하단에만 집계 기준 한 줄 표기 (밀도 "승차 지점·시각 기준" / 속력 "속력 = 트립 전체 구간 평균", 플로우는 표기 없음 — 해설 아닌 인코딩 정보), 이상치 제거 기준은 build_data.py 상수로 문서화
 - 설계 배경: docs_dev/superpowers/specs/2026-08-21-nyctaxidash-design.md, docs_dev/superpowers/specs/2026-08-25-one-screen-layout-design.md

@@ -76,7 +76,7 @@ function aggregate() {
   }
   return { type: "FeatureCollection", features: [...cells].map(([k, c]) => ({
     type: "Feature",
-    properties: { n: c.n, speed: +(c.sv / c.n).toFixed(1), faint: c.n < 5 ? 1 : 0 },
+    properties: { n: c.n, speed: +(c.sv / c.n).toFixed(1) },
     geometry: { type: "Polygon", coordinates: [hexPolygon(hexCenter(k))] },
   })) };
 }
@@ -121,6 +121,17 @@ function rebuildHexScale(fc) {
 
 function currentFillColor() {
   return state.metric === "speed" ? FILL_SPEED : fillCount;
+}
+
+// 지표별 fill-opacity. 표본 수는 밀도 지표·hover 팝업이 담당하므로 표본 미달 셀을
+// 따로 흐리게 하지 않음 (투명도로 표본 수를 겹쳐 인코딩하면 색 가시성만 훼손)
+// - 속력: 불투명 — 반투명이면 베이스맵(수변·공원)색이 섞여 속력 색이 왜곡됨
+// - 밀도: 반투명 — 베이스맵 맥락 유지 (액센트 테두리안은 비교 후 미채택, 테두리는 공통 흰색)
+const HEX_OPACITY = { speed: 1, count: 0.72 };
+
+function applyHexPaint() {
+  map.setPaintProperty("hex", "fill-color", currentFillColor());
+  map.setPaintProperty("hex", "fill-opacity", HEX_OPACITY[state.metric]);
 }
 
 // ---------- 플로우 레이어 ----------
@@ -168,7 +179,6 @@ function buildFlowPaint(fc) {
 let legendEl = null;
 let flowLegend = null; // [[n, px, opacity], ...] — updateFlowLayer가 슬라이스마다 갱신
 let hexEmpty = false;  // 선택 요일·시간에 셀이 하나도 없으면 밀도 눈금 대신 "—"
-const HEX_OPACITY = 0.72; // 헥스 fill-opacity (표본 미달 셀은 0.25)
 
 class LegendControl {
   onAdd() {
@@ -265,7 +275,7 @@ function countSection(expr) {
   const k = stops.length - 1;
   const gradient = stops.map(([, c], i) => `${c} ${(i / k * 100).toFixed(1)}%`).join(", ");
   const ticks = dedupeByLabel(stops.map(([v], i) => [i / k, fmtStop(v) + (i === k ? "+" : "")]), (t) => t[1]);
-  return `<div class="lg-row">${title}${legendRamp(gradient, ticks, HEX_OPACITY)}</div>`;
+  return `<div class="lg-row">${title}${legendRamp(gradient, ticks, HEX_OPACITY.count)}</div>`;
 }
 
 // 통행량: 슬라이스별 분위수 스톱을 이은 연속 두께 쐐기 + 스톱 값 눈금
@@ -283,7 +293,15 @@ function widthSection() {
   return `<div class="lg-row">${legendTitle("통행량")}${body}</div>`;
 }
 
-const FAINT_NOTE = `<div class="lg-row lg-note"><i class="lg-faint"></i>반투명 = 표본 5건 미만</div>`;
+// 헥스 집계 기준 — 범례 하단 한 줄 (플로우는 표기 없음).
+// 밀도는 무엇을 셌는지, 속력은 셀 안의 주행 속도가 아니라 그 셀에서 출발한 트립의
+// 전체 구간 평균이라는 점을 명시
+const BASIS_COUNT = "승차 지점·시각 기준";
+const BASIS_SPEED = "속력 = 트립 전체 구간 평균";
+
+function basisNote(text) {
+  return `<div class="lg-row lg-note">${text}</div>`;
+}
 
 function renderLegend() {
   if (!legendEl) return;
@@ -292,9 +310,9 @@ function renderLegend() {
     const rampOpacity = flowLegend ? flowLegend[Math.floor(flowLegend.length / 2)][2] : 0.8;
     legendEl.innerHTML = speedSection(FLOW_SPEED_COLOR, rampOpacity.toFixed(2)) + widthSection();
   } else if (state.metric === "speed") {
-    legendEl.innerHTML = speedSection(FILL_SPEED, HEX_OPACITY) + FAINT_NOTE;
+    legendEl.innerHTML = speedSection(FILL_SPEED, HEX_OPACITY.speed) + basisNote(BASIS_SPEED);
   } else {
-    legendEl.innerHTML = countSection(fillCount) + FAINT_NOTE;
+    legendEl.innerHTML = countSection(fillCount) + basisNote(BASIS_COUNT);
   }
 }
 
@@ -647,7 +665,7 @@ function initMap() {
       source: "hex",
       paint: {
         "fill-color": currentFillColor(),
-        "fill-opacity": ["case", ["==", ["get", "faint"], 1], 0.25, HEX_OPACITY],
+        "fill-opacity": HEX_OPACITY[state.metric],
         "fill-outline-color": "#ffffff",
       },
     });
@@ -701,7 +719,7 @@ function initMap() {
     map.on("mousemove", "hex", (e) => {
       map.getCanvas().style.cursor = "pointer";
       const p = e.features[0].properties;
-      popup.setLngLat(e.lngLat).setHTML(`트립 ${p.n}건 · 평균 ${p.speed} km/h`).addTo(map);
+      popup.setLngLat(e.lngLat).setHTML(`승차 ${p.n}건 · 평균 ${p.speed} km/h`).addTo(map);
     });
     map.on("mouseleave", "hex", () => {
       map.getCanvas().style.cursor = "";
@@ -805,7 +823,7 @@ function bindControls() {
       if (state.metric === btn.dataset.metric) return;
       state.metric = btn.dataset.metric;
       document.querySelectorAll(".ctl-metric button[data-metric]").forEach((b) => b.classList.toggle("on", b === btn));
-      if (mapReady && map.getLayer("hex")) map.setPaintProperty("hex", "fill-color", currentFillColor());
+      if (mapReady && map.getLayer("hex")) applyHexPaint();
       renderLegend();
     });
   });

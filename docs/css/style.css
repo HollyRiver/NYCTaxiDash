@@ -537,10 +537,8 @@ body {
   color: var(--muted);
 }
 
+/* 헥스 집계 기준 주석 한 줄 (main.js basisNote) — 눈금과 같은 크기·색 */
 .lg-note {
-  display: flex;
-  align-items: center;
-  gap: 5px;
   font-size: 10px;
   color: var(--muted);
 }
@@ -611,15 +609,6 @@ body {
 .map-busy.err { background: transparent; }
 .map-busy.err .map-busy-spin { display: none; }
 .map-busy.err .map-busy-pill { color: #a63232; }
-
-/* 헥스 반투명 처리(fill-opacity 0.25) 견본 — 색 범주로 오인되지 않게 중립 회색 */
-.lg-faint {
-  flex-shrink: 0;
-  width: 9px;
-  height: 9px;
-  background: rgba(74, 74, 80, 0.25);
-  border: 1px solid rgba(74, 74, 80, 0.3);
-}
 
 /* --------------------------------------------------------------------------
    Footer — 제작·저작권 1줄 (해설 텍스트는 README.md로 이관)
