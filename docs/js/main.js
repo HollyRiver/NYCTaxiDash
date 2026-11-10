@@ -113,6 +113,12 @@ function buildCountColor(fc) {
   return ["interpolate", ["linear"], ["get", "n"], 1, COUNT_PALETTE[0], Math.max(max, 2), COUNT_PALETTE[3]];
 }
 
+// 밀도 색 스톱 + 빈 선택 여부를 함께 갱신 (지도·범례가 같은 값을 보도록)
+function rebuildHexScale(fc) {
+  fillCount = buildCountColor(fc);
+  hexEmpty = fc.features.length === 0;
+}
+
 function currentFillColor() {
   return state.metric === "speed" ? FILL_SPEED : fillCount;
 }
@@ -120,6 +126,7 @@ function currentFillColor() {
 // ---------- 플로우 레이어 ----------
 const flowCache = {}; // wp+band → GeoJSON (lazy fetch)
 let flowReq = 0;      // 최신 요청만 반영하기 위한 시퀀스
+let flowFailed = false; // 현재 선택 슬라이스 로드 실패 — 같은 버튼 재선택을 재시도로 허용
 
 // 색/두께 분리 (9차): 색 = 세그먼트 평균 속력(s, 정체=검붉음), 두께 = 통행량(n).
 // 색은 속력 기준 고정 램프 — 헥스 FILL_SPEED와 동일 의미론(저속=검붉음 → 고속=초록).
@@ -148,7 +155,191 @@ function buildFlowPaint(fc) {
     width = ["interpolate", ["linear"], ["get", "n"], lo, FLOW_WIDTHS[0], top, FLOW_WIDTHS[4]];
     opacity = ["interpolate", ["linear"], ["get", "n"], lo, 0.5, top, 0.98];
   }
-  return { color: FLOW_SPEED_COLOR, width, opacity };
+  // 범례용: 두께 스톱마다 [n, 굵기px, 투명도] — 빈 슬라이스는 null (범례 "—")
+  const legend = ns.length
+    ? exprStops(width).map(([n, w]) => [n, w, interpAt(opacity, n)])
+    : null;
+  return { color: FLOW_SPEED_COLOR, width, opacity, legend };
+}
+
+// ---------- 범례 (지도 좌상단 오버레이) ----------
+// 현재 레이어·지표의 색/두께 인코딩을 표시. 램프·스톱은 실제 paint 표현식에서
+// 그대로 읽어 그리므로 지도와 범례가 어긋나지 않음 (동적 분위수 스톱 포함).
+let legendEl = null;
+let flowLegend = null; // [[n, px, opacity], ...] — updateFlowLayer가 슬라이스마다 갱신
+let hexEmpty = false;  // 선택 요일·시간에 셀이 하나도 없으면 밀도 눈금 대신 "—"
+const HEX_OPACITY = 0.72; // 헥스 fill-opacity (표본 미달 셀은 0.25)
+
+class LegendControl {
+  onAdd() {
+    this._container = document.createElement("div");
+    this._container.className = "maplibregl-ctrl map-legend";
+    this._container.setAttribute("role", "group");
+    this._container.setAttribute("aria-label", "지도 범례");
+    legendEl = this._container;
+    return this._container;
+  }
+  onRemove() {
+    this._container.remove();
+    legendEl = null;
+  }
+}
+
+// ["interpolate", ["linear"], input, v0, out0, v1, out1, ...] → [[v0, out0], ...]
+function exprStops(expr) {
+  const out = [];
+  for (let i = 3; i + 1 < expr.length; i += 2) out.push([expr[i], expr[i + 1]]);
+  return out;
+}
+
+// interpolate(linear) 표현식을 x에서 평가 — 양끝 밖은 클램프 (MapLibre와 동일)
+function interpAt(expr, x) {
+  const s = exprStops(expr);
+  if (x <= s[0][0]) return s[0][1];
+  for (let i = 1; i < s.length; i++) {
+    if (x <= s[i][0]) return s[i - 1][1] + (s[i][1] - s[i - 1][1]) * (x - s[i - 1][0]) / (s[i][0] - s[i - 1][0]);
+  }
+  return s[s.length - 1][1];
+}
+
+// 분위수 스톱은 소수가 나오므로 10 미만만 소수 1자리 유지
+function fmtStop(v) {
+  return v >= 10 ? Math.round(v).toLocaleString("en-US") : String(+v.toFixed(1));
+}
+
+// 반올림 후 같은 라벨이 연달아 나오면 마지막(가장 굵은/진한) 것만 남김
+function dedupeByLabel(items, label) {
+  return items.filter((it, i) => i === items.length - 1 || label(it) !== label(items[i + 1]));
+}
+
+// unit은 선택 — 미국 데이터라 mph로 오인될 수 있는 속력에만 붙임
+function legendTitle(label, unit) {
+  return `<div class="lg-title">${label}${unit ? `<span class="lg-unit">${unit}</span>` : ""}</div>`;
+}
+
+const LEGEND_PENDING = `<div class="lg-pending">—</div>`;
+
+// ticks: [[위치 0–1, 라벨], ...] — 양끝은 바 끝에 맞추고 중간은 중앙 정렬 (CSS)
+function legendTicks(ticks) {
+  return `<div class="lg-ticks">${ticks.map(([p, t]) => `<span style="left:${(p * 100).toFixed(1)}%">${t}</span>`).join("")}</div>`;
+}
+
+// opacity: 지도 레이어 투명도와 맞춰 실제로 보이는 색 농도를 재현
+function legendRamp(gradient, ticks, opacity) {
+  return `<div class="lg-ramp" style="background:linear-gradient(90deg, ${gradient});opacity:${opacity}"></div>${legendTicks(ticks)}`;
+}
+
+// 두께 쐐기: 바닥이 평평한 직각삼각형 꼴 — 스톱(등간격)마다 실제 선 굵기(px)·투명도를
+// 꼭짓점으로 잇는 구간별 선형 폴리곤. 지도의 line-width·line-opacity 보간과 동일한 모양.
+// viewBox 세로 1단위 = 1px (preserveAspectRatio none, 높이 WEDGE_H px)
+const WEDGE_H = 6; // FLOW_WIDTHS 최대 5.5px 수납
+function legendWedge(stops) {
+  const k = stops.length - 1;
+  const x = (i) => (i / k * 100).toFixed(2);
+  const top = stops.map(([, w], i) => `${x(i)},${(WEDGE_H - w).toFixed(2)}`).join(" ");
+  const fade = stops.map(([, , o], i) => `<stop offset="${x(i)}%" stop-color="#3a3a40" stop-opacity="${o.toFixed(2)}"/>`).join("");
+  return `<svg class="lg-wedge" viewBox="0 0 100 ${WEDGE_H}" preserveAspectRatio="none" aria-hidden="true">`
+    + `<defs><linearGradient id="lg-wedge-fade">${fade}</linearGradient></defs>`
+    + `<polygon points="0,${WEDGE_H} ${top} 100,${WEDGE_H}" fill="url(#lg-wedge-fade)"/></svg>`;
+}
+
+// 속력: 지도와 같은 선형 보간 — 색 위치를 값에 비례시키고 눈금은 도메인 균등 분할.
+// 도메인 밖은 양끝 색으로 클램프되므로 눈금도 "≤최소", "최대+"
+function speedSection(expr, opacity) {
+  const stops = exprStops(expr);
+  const lo = stops[0][0], hi = stops[stops.length - 1][0];
+  const pos = (v) => (v - lo) / (hi - lo);
+  const gradient = stops.map(([v, c]) => `${c} ${(pos(v) * 100).toFixed(1)}%`).join(", ");
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((p, i, a) => {
+    const v = Math.round(lo + (hi - lo) * p);
+    return [p, i === 0 ? "≤" + v : i === a.length - 1 ? v + "+" : String(v)];
+  });
+  return `<div class="lg-row">${legendTitle("평균 속력", "km/h")}${legendRamp(gradient, ticks, opacity)}</div>`;
+}
+
+// 밀도: 분위수 스톱을 등간격으로 배치(구간별 선형) — 눈금 = 실제 스톱 값
+function countSection(expr) {
+  const title = legendTitle("이용 밀도");
+  if (hexEmpty) return `<div class="lg-row">${title}${LEGEND_PENDING}</div>`;
+  const stops = exprStops(expr);
+  const k = stops.length - 1;
+  const gradient = stops.map(([, c], i) => `${c} ${(i / k * 100).toFixed(1)}%`).join(", ");
+  const ticks = dedupeByLabel(stops.map(([v], i) => [i / k, fmtStop(v) + (i === k ? "+" : "")]), (t) => t[1]);
+  return `<div class="lg-row">${title}${legendRamp(gradient, ticks, HEX_OPACITY)}</div>`;
+}
+
+// 통행량: 슬라이스별 분위수 스톱을 이은 연속 두께 쐐기 + 스톱 값 눈금
+function widthSection() {
+  let body = LEGEND_PENDING;
+  if (flowLegend) {
+    const k = flowLegend.length - 1;
+    // 쐐기 꼭짓점은 전 스톱을 쓰되 눈금은 처음·가운데·끝만 — 좁은 폭에서 5개면 큰 수끼리 겹침
+    const shown = new Set([0, Math.round(k / 2), k]);
+    const ticks = dedupeByLabel(flowLegend
+      .map(([n], i) => [i / k, fmtStop(n) + (i === k ? "+" : "")])
+      .filter((_, i) => shown.has(i)), (t) => t[1]);
+    body = legendWedge(flowLegend) + legendTicks(ticks);
+  }
+  return `<div class="lg-row">${legendTitle("통행량")}${body}</div>`;
+}
+
+const FAINT_NOTE = `<div class="lg-row lg-note"><i class="lg-faint"></i>반투명 = 표본 5건 미만</div>`;
+
+function renderLegend() {
+  if (!legendEl) return;
+  if (state.layer === "flow") {
+    // 선 투명도는 통행량 따라 0.5–0.98 — 램프는 중간 굵기 견본과 같은 투명도로 표시
+    const rampOpacity = flowLegend ? flowLegend[Math.floor(flowLegend.length / 2)][2] : 0.8;
+    legendEl.innerHTML = speedSection(FLOW_SPEED_COLOR, rampOpacity.toFixed(2)) + widthSection();
+  } else if (state.metric === "speed") {
+    legendEl.innerHTML = speedSection(FILL_SPEED, HEX_OPACITY) + FAINT_NOTE;
+  } else {
+    legendEl.innerHTML = countSection(fillCount) + FAINT_NOTE;
+  }
+}
+
+// ---------- 로딩 표시 (지도 오버레이) ----------
+// 슬라이스 fetch(최대 ~2.4MB) → setData → 워커 파싱 → 렌더까지 수 초 걸릴 수 있어
+// 컨트롤 쪽이 아니라 지도 위에 직접 표시. 토큰: 더 최근 작업이 시작되면 이전 작업의
+// 완료 콜백은 오버레이를 건드리지 않음.
+const WP_LABEL = { wd: "주중", we: "주말", all: "전체 요일" };
+const BAND_LABEL = { 0: "새벽", 1: "오전", 2: "오후", 3: "저녁", all: "전체 시간대" };
+let busyEl = null;
+let busyToken = 0;
+
+function ensureBusyEl() {
+  if (busyEl) return busyEl;
+  const host = document.getElementById("map");
+  if (!host) return null;
+  busyEl = document.createElement("div");
+  busyEl.className = "map-busy";
+  busyEl.setAttribute("role", "status");
+  busyEl.setAttribute("aria-live", "polite");
+  busyEl.innerHTML = '<span class="map-busy-pill"><i class="map-busy-spin" aria-hidden="true"></i><span class="map-busy-text"></span></span>';
+  host.appendChild(busyEl);
+  return busyEl;
+}
+
+// 오버레이 표시 — 반환 토큰을 clearMapBusy*에 넘겨 해당 작업 완료 시에만 해제
+function setMapBusy(text, isError = false) {
+  const token = ++busyToken;
+  const el = ensureBusyEl();
+  if (!el) return token;
+  el.querySelector(".map-busy-text").textContent = text;
+  el.classList.toggle("err", isError);
+  el.classList.add("on");
+  return token;
+}
+
+function clearMapBusy(token = busyToken) {
+  if (token !== busyToken || !busyEl) return;
+  busyEl.classList.remove("on");
+}
+
+// setData 직후엔 소스가 미로드 상태라 idle은 파싱·렌더가 끝난 뒤에야 발생
+function clearMapBusyOnIdle(token) {
+  if (map) map.once("idle", () => clearMapBusy(token));
+  else clearMapBusy(token);
 }
 
 // 모드별 컨트롤 표시 전환: 플로우 → .ctl-flow만, 헥스 → 요일/시간/지표만
@@ -168,11 +359,16 @@ function syncModeControls() {
 window.updateFlowLayer = async function () {
   const flowMode = state.layer === "flow";
   syncModeControls();
+  renderLegend(); // 모드 전환 즉시 반영 — 지도 로드 전이어도 (두께 스톱은 슬라이스 로드 후 갱신)
   if (!mapReady || !map.getLayer("flow-lines")) return;
 
   if (!flowMode) {
     map.setLayoutProperty("flow-lines", "visibility", "none");
     map.setLayoutProperty("hex", "visibility", "visible");
+    // 진행 중이던 플로우 표시·실패 문구를 대체. 헥스는 대개 이미 로드돼 있어 idle이
+    // 표시 지연(0.15s) 전에 와서 보이지 않지만, 지도 로드 직후처럼 미완이면 렌더까지 유지
+    flowFailed = false;
+    clearMapBusyOnIdle(setMapBusy("헥스빈 히트맵 불러오는 중…"));
     return;
   }
 
@@ -181,19 +377,24 @@ window.updateFlowLayer = async function () {
 
   const key = state.flowWp + state.flowBand;
   const seq = ++flowReq;
+  // 캐시 히트여도 setData → 워커 파싱 → 렌더에 시간이 걸리므로 매 전환마다 표시
+  const sliceLabel = `${WP_LABEL[state.flowWp]} · ${BAND_LABEL[state.flowBand]}`;
+  const busy = setMapBusy(`${sliceLabel} 플로우 불러오는 중…`);
+  flowFailed = false;
   if (!flowCache[key]) {
-    // .ctl-note는 플로우 로딩/실패 상태 표시 전용 (기본은 빈 텍스트)
-    const note = document.querySelector(".ctl-note");
-    if (note) note.textContent = "로드 중…";
     try {
       flowCache[key] = await fetch(`data/flow_${state.flowWp}_${state.flowBand}.geojson`).then((r) => {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       });
-      if (note) note.textContent = "";
     } catch (e) {
       console.error("플로우 로드 실패:", e);
-      if (note) note.textContent = "플로우 데이터 로드 실패";
+      // 그 사이 다른 슬라이스·헥스로 넘어갔으면 실패를 표시하지 않음
+      // (지도에는 직전 슬라이스가 남아 있으므로 실패한 슬라이스를 명시)
+      if (seq === flowReq && state.layer === "flow") {
+        flowFailed = true;
+        setMapBusy(`${sliceLabel} 로드 실패 · 재선택 시 재시도`, true);
+      }
       return;
     }
   }
@@ -204,6 +405,9 @@ window.updateFlowLayer = async function () {
   map.setPaintProperty("flow-lines", "line-color", paint.color);
   map.setPaintProperty("flow-lines", "line-width", paint.width);
   map.setPaintProperty("flow-lines", "line-opacity", paint.opacity);
+  flowLegend = paint.legend;
+  renderLegend();
+  clearMapBusyOnIdle(busy);
 };
 
 // ---------- KPI ----------
@@ -396,8 +600,16 @@ function initMap() {
     zoom: FALLBACK_VIEW.zoom,
     attributionControl: true,
   });
+  // 베이스맵 스타일 fetch 실패 시 load가 오지 않아 스피너가 영원히 돎 → 실패로 전환.
+  // 타일 오류는 sourceId/tile을 가지므로 제외. (스프라이트 등 비치명 오류 후 load가 오면
+  // load 핸들러가 새 표시로 덮어씀)
+  map.on("error", (e) => {
+    if (!mapReady && !e.sourceId && !e.tile) setMapBusy("베이스맵 로드 실패 · 새로고침 필요", true);
+  });
   map.addControl(new maplibregl.NavigationControl(), "top-right");
   map.addControl(new ResetViewControl(), "top-right");
+  map.addControl(new LegendControl(), "top-left"); // 좌하단은 좁은 지도에서 펼쳐진 attribution과 겹침
+  renderLegend();
 
   map.on("load", () => {
     // 데이터 전체 bbox fitBounds 후 줌 +1 (센터 유지) — bbox 전체보다 "한 번 확대된"
@@ -427,7 +639,7 @@ function initMap() {
     } catch (e) { /* 스타일 탐색 실패도 무시하고 진행 */ }
 
     const hexFc = aggregate();
-    fillCount = buildCountColor(hexFc);
+    rebuildHexScale(hexFc);
     map.addSource("hex", { type: "geojson", data: hexFc });
     map.addLayer({
       id: "hex",
@@ -435,7 +647,7 @@ function initMap() {
       source: "hex",
       paint: {
         "fill-color": currentFillColor(),
-        "fill-opacity": ["case", ["==", ["get", "faint"], 1], 0.25, 0.72],
+        "fill-opacity": ["case", ["==", ["get", "faint"], 1], 0.25, HEX_OPACITY],
         "fill-outline-color": "#ffffff",
       },
     });
@@ -506,14 +718,16 @@ function initMap() {
     });
 
     mapReady = true;
-    if (state.layer === "flow") window.updateFlowLayer(); // 로드 전에 플로우로 전환한 경우 반영
+    renderLegend(); // 로드 전에 헥스로 전환·지표 변경한 경우까지 반영
+    if (state.layer === "flow") window.updateFlowLayer(); // 슬라이스 로딩 표시가 초기 표시를 이어받음
+    else clearMapBusyOnIdle(busyToken); // 헥스는 첫 렌더 완료 시 초기 로딩 표시 해제
   });
 }
 
 // ---------- 갱신 ----------
 function refresh() {
   const fc = aggregate();
-  fillCount = buildCountColor(fc); // 밀도 스케일을 현재 선택의 분위수로 재산정
+  rebuildHexScale(fc); // 밀도 스케일을 현재 선택의 분위수로 재산정
   if (mapReady && map.getSource("hex")) {
     map.getSource("hex").setData(fc);
     if (state.metric === "count" && map.getLayer("hex")) {
@@ -522,6 +736,7 @@ function refresh() {
   }
   if (window.updateCharts) window.updateCharts();
   updateKpis();
+  renderLegend(); // 밀도 스톱이 선택마다 바뀜
 }
 window.__refresh = refresh;
 
@@ -591,6 +806,7 @@ function bindControls() {
       state.metric = btn.dataset.metric;
       document.querySelectorAll(".ctl-metric button[data-metric]").forEach((b) => b.classList.toggle("on", b === btn));
       if (mapReady && map.getLayer("hex")) map.setPaintProperty("hex", "fill-color", currentFillColor());
+      renderLegend();
     });
   });
 
@@ -610,7 +826,7 @@ function bindControls() {
   // flowWp는 "wd"|"we"|"all", flowBand는 0..3 숫자 또는 "all" 문자열
   document.querySelectorAll(".ctl-flow button[data-wp]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (state.flowWp === btn.dataset.wp) return;
+      if (state.flowWp === btn.dataset.wp && !flowFailed) return; // 로드 실패 시 재선택 = 재시도
       state.flowWp = btn.dataset.wp;
       document.querySelectorAll(".ctl-flow button[data-wp]").forEach((b) => b.classList.toggle("on", b === btn));
       applyFlowDayRange();
@@ -620,7 +836,7 @@ function bindControls() {
   document.querySelectorAll(".ctl-flow button[data-band]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const val = btn.dataset.band === "all" ? "all" : +btn.dataset.band;
-      if (state.flowBand === val) return;
+      if (state.flowBand === val && !flowFailed) return;
       state.flowBand = val;
       document.querySelectorAll(".ctl-flow button[data-band]").forEach((b) => b.classList.toggle("on", b === btn));
       window.updateFlowLayer();
@@ -632,12 +848,14 @@ function bindControls() {
 
 // ---------- 초기화 ----------
 async function init() {
+  setMapBusy("지도 불러오는 중…"); // 데이터·베이스맵·첫 슬라이스 렌더까지 (load 핸들러가 인계)
   const [trips, meta, landmarks] = await Promise.all([
     fetch("data/trips.json").then((r) => r.json()),
     fetch("data/meta.json").then((r) => r.json()),
     fetch("data/landmarks.json").then((r) => r.json()),
   ]);
   TRIPS = trips; META = meta; LANDMARKS = landmarks;
+  rebuildHexScale(aggregate()); // 지도 로드 전 범례도 실제 밀도 스톱을 쓰도록 선계산
   updateKpis();
   bindControls();
   syncModeControls(); // 플로우 기본 — 모드에 맞는 컨트롤 그룹만 표시
@@ -647,6 +865,7 @@ async function init() {
     const fc = aggregate();
     const total = fc.features.reduce((s, f) => s + f.properties.n, 0);
     document.title = `SELFTEST cells=${fc.features.length} trips=${total} n=${META.n}`;
+    clearMapBusy();
     return; // 셀프테스트에서는 지도 초기화 생략 (WebGL 불필요)
   }
 
@@ -670,6 +889,7 @@ async function init() {
 
 init().catch((e) => {
   console.error("초기화 실패:", e);
+  setMapBusy("지도 초기화 실패 · 새로고침 필요", true); // 데이터·CDN 스크립트·WebGL 실패 모두 해당
   const hero = document.querySelector(".hero");
   if (hero) {
     const msg = document.createElement("p");
